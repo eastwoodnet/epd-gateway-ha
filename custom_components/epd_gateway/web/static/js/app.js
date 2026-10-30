@@ -1351,6 +1351,70 @@ function initSettingsForm() {
     });
   }
 
+  // 天气早报预览与推送按钮
+  const refreshWeatherBtn = document.getElementById("refreshWeatherBtn");
+  const previewWeatherBtn = document.getElementById("previewWeatherBtn");
+  const weatherPreviewBox = document.getElementById("weatherPreviewBox");
+  const weatherPreviewImg = document.getElementById("weatherPreviewImg");
+  const closeWeatherPreviewBtn = document.getElementById("closeWeatherPreviewBtn");
+  const pushWeatherNowBtn = document.getElementById("pushWeatherNowBtn");
+
+  if (refreshWeatherBtn) {
+    refreshWeatherBtn.addEventListener("click", async () => {
+      refreshWeatherBtn.disabled = true;
+      refreshWeatherBtn.textContent = "⏳ 刷新中...";
+      try {
+        const data = await requestJson("/api/weather/refresh", { method: "POST" });
+        alert(data.message || "天气数据已刷新！");
+        if (weatherPreviewBox && weatherPreviewBox.style.display !== "none" && weatherPreviewImg) {
+          weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
+        }
+      } catch (err) {
+        alert("刷新失败: " + err.message);
+      } finally {
+        refreshWeatherBtn.disabled = false;
+        refreshWeatherBtn.textContent = "🔄 刷新数据";
+      }
+    });
+  }
+
+  if (previewWeatherBtn && weatherPreviewBox && weatherPreviewImg) {
+    previewWeatherBtn.addEventListener("click", () => {
+      weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
+      weatherPreviewBox.style.display = "block";
+    });
+  }
+
+  if (closeWeatherPreviewBtn && weatherPreviewBox) {
+    closeWeatherPreviewBtn.addEventListener("click", () => {
+      weatherPreviewBox.style.display = "none";
+    });
+  }
+
+  if (pushWeatherNowBtn) {
+    pushWeatherNowBtn.addEventListener("click", async () => {
+      pushWeatherNowBtn.disabled = true;
+      pushWeatherNowBtn.textContent = "⏳ 推送中...";
+      try {
+        // 1. 设置闲时兜底模式为天气早报
+        if (currentScheduleConfig) {
+          const nextConfig = cloneScheduleConfig();
+          nextConfig.fallback_mode = "weather_date";
+          await saveScheduleConfig(nextConfig);
+        }
+        // 2. 触发网关同步
+        const data = await requestJson("/api/trigger", { method: "POST" });
+        alert(data.message || "⛅ 天气早报已切换为当前生效模式并推送到墨水屏！");
+        await loadSchedule();
+      } catch (err) {
+        alert("推送失败: " + err.message);
+      } finally {
+        pushWeatherNowBtn.disabled = false;
+        pushWeatherNowBtn.textContent = "⛅ 立即推送";
+      }
+    });
+  }
+
   // 日历预览按钮
   const previewCalBtn = document.getElementById("previewCalendarBtn");
   const previewBox = document.getElementById("calendarPreviewBox");

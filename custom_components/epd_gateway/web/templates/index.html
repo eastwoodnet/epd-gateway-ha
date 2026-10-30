@@ -351,7 +351,23 @@
               <input type="text" id="indoorHumidityEntityInput" placeholder="如: sensor.workroom_humidity" maxlength="255">
             </div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;">保存核心与天气设置</button>
+            <div class="action-row" style="margin-top: 16px; margin-bottom: 8px;">
+              <button type="submit" class="btn btn-primary" style="flex: 1.2;">保存天气设置</button>
+              <button type="button" class="btn btn-outline" id="refreshWeatherBtn" style="flex: 1;">🔄 刷新数据</button>
+              <button type="button" class="btn btn-outline" id="previewWeatherBtn" style="flex: 1;">🖼️ 预览早报</button>
+              <button type="button" class="btn btn-secondary" id="pushWeatherNowBtn" style="flex: 1.2;">⛅ 立即推送</button>
+            </div>
+
+            <!-- 天气早报预览图展开区 -->
+            <div id="weatherPreviewBox" style="display: none; margin-top: 14px; text-align: center; background: var(--bg-secondary); padding: 16px; border-radius: 10px; border: 1px solid var(--border-color);">
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <span>400×300 天气早报渲染预览 (含室内温湿度):</span>
+                <button type="button" id="closeWeatherPreviewBtn" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;">收起</button>
+              </div>
+              <div class="eink-bezel" style="margin: 6px auto;">
+                <img id="weatherPreviewImg" src="" alt="天气早报预览" style="width: 100%; max-width: 400px; display: block; image-rendering: pixelated;">
+              </div>
+            </div>
           </form>
         </div>
 
