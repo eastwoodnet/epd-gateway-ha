@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure EPD E-Paper Wireless Gateway",
+        "description": "Bind your local ESP32 E-Paper Wireless Gateway IP and optionally link Home Assistant weather and calendar entities (falls back to wttr.in and iCal URL if left blank).",
+        "data": {
+          "gateway_url": "ESP32 Gateway URL (e.g. http://192.168.1.100)",
+          "weather_entity": "Home Assistant Weather Entity (Optional)",
+          "indoor_temp_entity": "Home Assistant Indoor Temperature Sensor (Optional)",
+          "indoor_humidity_entity": "Home Assistant Indoor Humidity Sensor (Optional)",
+          "calendar_entity": "Home Assistant Calendar Entity (Optional)",
+          "weather_city": "Fallback Weather City (e.g. Shanghai / blank for auto)",
+          "calendar_ical_url": "iCal Subscription URL (webcal:// or https://)",
+          "register_panel": "Register 'EPD 墨水屏' Workbench in Home Assistant Sidebar (Photo Studio & 24H Schedule)"
+        }
+      }
+    },
+    "error": {
+      "invalid_gateway_url": "Invalid ESP32 Gateway URL. Please enter a valid LAN IPv4 address (e.g. http://192.168.1.100).",
+      "invalid_weather_city": "Invalid weather city name.",
+      "invalid_ical_url": "iCal URL must start with http://, https://, or webcal://."
+    },
+    "abort": {
+      "already_configured": "EPD E-Paper Wireless Gateway is already configured. Click 'Configure' on the integration card to update settings."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EPD E-Paper Gateway Options",
+        "description": "Update the ESP32 Gateway IP address, linked Home Assistant entities, or sidebar workbench visibility.",
+        "data": {
+          "gateway_url": "ESP32 Gateway URL (e.g. http://192.168.1.100)",
+          "weather_entity": "Home Assistant Weather Entity (Optional)",
+          "indoor_temp_entity": "Home Assistant Indoor Temperature Sensor (Optional)",
+          "indoor_humidity_entity": "Home Assistant Indoor Humidity Sensor (Optional)",
+          "calendar_entity": "Home Assistant Calendar Entity (Optional)",
+          "weather_city": "Fallback Weather City (e.g. Shanghai / blank for auto)",
+          "calendar_ical_url": "iCal Subscription URL (webcal:// or https://)",
+          "register_panel": "Show 'EPD 墨水屏' Workbench in Home Assistant Sidebar"
+        }
+      }
+    },
+    "error": {
+      "invalid_gateway_url": "Invalid ESP32 Gateway URL. Please enter a valid LAN IPv4 address (e.g. http://192.168.1.100).",
+      "invalid_weather_city": "Invalid weather city name.",
+      "invalid_ical_url": "iCal URL must start with http://, https://, or webcal://."
+    }
+  }
+}

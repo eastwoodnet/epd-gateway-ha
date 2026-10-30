@@ -1,0 +1,73 @@
+push_memo:
+  name: 推送即时桌面便签 (Push Instant Memo)
+  description: 压入最高优先级的即时便签画面，并立即唤醒 ESP32 网关刷屏。到期后自动恢复 24H 排程。
+  fields:
+    text:
+      name: 便签正文 (Text)
+      description: 要在 4.2 寸墨水屏上展示的留言内容 (1~280字，支持自动换行)。
+      required: true
+      example: "下午 3 点记得去快递驿站取生鲜包裹！"
+      selector:
+        text:
+          multiline: true
+    title:
+      name: 便签标题 (Title)
+      description: 顶部红底标题栏显示的标题文字。
+      required: false
+      default: "📌 桌面备忘提醒"
+      example: "📌 家庭重要留言"
+      selector:
+        text:
+    duration_min:
+      name: 驻留时长(分钟) (Duration in Minutes)
+      description: 便签在屏幕上保留的时间，到期后自动恢复常规排程。
+      required: false
+      default: 120
+      selector:
+        number:
+          min: 5
+          max: 1440
+          unit_of_measurement: "分钟"
+    sender:
+      name: 发送者署名 (Sender)
+      description: 底部状态栏显示的发送人或触发来源。
+      required: false
+      default: "HA自动化"
+      example: "Home Assistant"
+      selector:
+        text:
+
+clear_memo:
+  name: 撤回即时便签 (Clear Active Memo)
+  description: 立即清除当前正在插播的桌面便签，并通知 ESP32 网关恢复常规 24H 排程画面。
+
+trigger_sync:
+  name: 立即触发网关同步 (Trigger Gateway Sync)
+  description: 立即向 ESP32 网关发送 /api/trigger 唤醒指令，拉取最新墨水屏画面。
+
+trigger_native_calendar:
+  name: 切换至硬件原生万年历 (Switch to Native Perpetual Calendar)
+  description: 指令 ESP32 网关向墨水屏发送 0x20 蓝牙校准指令，切换至 nRF 片上硬件原生万年历（含农历与节气）。
+
+set_fallback_mode:
+  name: 设置闲时兜底模式 (Set Fallback Display Mode)
+  description: 修改未命中任何 24H 排程规则时的闲时兜底展示模式。
+  fields:
+    mode:
+      name: 显示模式 (Display Mode)
+      description: 选择兜底显示模式。
+      required: true
+      default: "photo_album"
+      selector:
+        select:
+          options:
+            - label: "🖼️ 相册轮播 (photo_album)"
+              value: "photo_album"
+            - label: "⛅ 天气与日期 (weather_date)"
+              value: "weather_date"
+            - label: "📅 今日日程看板 (calendar_todo)"
+              value: "calendar_todo"
+            - label: "📆 硬件原生万年历 (clock)"
+              value: "clock"
+            - label: "🌙 免打扰休眠 (sleep_dnd)"
+              value: "sleep_dnd"

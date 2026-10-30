@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "配置 EPD 墨水屏无线网关",
+        "description": "绑定局域网内的 ESP32 墨水屏无线网关，并可选关联 Home Assistant 的天气与日历实体（若留空则自动使用 wttr.in 与 iCal 订阅源）。",
+        "data": {
+          "gateway_url": "ESP32 网关地址 (如 http://192.168.1.100)",
+          "weather_entity": "关联 HA 天气实体 (可选，优先于城市查询)",
+          "indoor_temp_entity": "关联 HA 室内温度传感器 (可选，如 sensor.workroom_temperature)",
+          "indoor_humidity_entity": "关联 HA 室内湿度传感器 (可选，如 sensor.workroom_humidity)",
+          "calendar_entity": "关联 HA 日历实体 (可选，iCal 链接留空时生效)",
+          "weather_city": "默认天气城市 (如 Shanghai / 留空自动定位)",
+          "calendar_ical_url": "iCal 日历订阅链接 (webcal:// 或 https://)",
+          "register_panel": "在 Home Assistant 左侧边栏注册「EPD 墨水屏」工作台 (含3卡槽相册抖动与24H排程)"
+        }
+      }
+    },
+    "error": {
+      "invalid_gateway_url": "ESP32 网关地址格式无效，请输入局域网 IPv4 地址（如 http://192.168.1.100）",
+      "invalid_weather_city": "天气城市名称格式无效",
+      "invalid_ical_url": "iCal 订阅链接必须以 http://、https:// 或 webcal:// 开头"
+    },
+    "abort": {
+      "already_configured": "EPD 墨水屏无线网关已配置，您可在集成卡片中点击「配置」随时修改网关 IP 与实体绑定。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "调整 EPD 墨水屏网关配置",
+        "description": "随时修改 ESP32 网关 IP 地址、关联的 Home Assistant 天气/日历实体以及侧边栏工作台开关。",
+        "data": {
+          "gateway_url": "ESP32 网关地址 (如 http://192.168.1.100)",
+          "weather_entity": "关联 HA 天气实体 (可选)",
+          "indoor_temp_entity": "关联 HA 室内温度传感器 (可选，如 sensor.workroom_temperature)",
+          "indoor_humidity_entity": "关联 HA 室内湿度传感器 (可选，如 sensor.workroom_humidity)",
+          "calendar_entity": "关联 HA 日历实体 (可选)",
+          "weather_city": "默认天气城市 (如 Shanghai / 留空自动定位)",
+          "calendar_ical_url": "iCal 日历订阅链接 (webcal:// 或 https://)",
+          "register_panel": "在 Home Assistant 左侧边栏显示「EPD 墨水屏」工作台"
+        }
+      }
+    },
+    "error": {
+      "invalid_gateway_url": "ESP32 网关地址格式无效，请输入局域网 IPv4 地址（如 http://192.168.1.100）",
+      "invalid_weather_city": "天气城市名称格式无效",
+      "invalid_ical_url": "iCal 订阅链接必须以 http://、https:// 或 webcal:// 开头"
+    }
+  }
+}

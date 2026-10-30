@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EPD Gateway - Home Assistant 墨水屏工作台</title>
+  <link rel="stylesheet" href="/api/epd_gateway/static/css/style.css?v=20261030_ha1">
+  <script>
+    window.EPD_API_PREFIX = "/api/epd_gateway";
+    (function() {
+      try {
+        var saved = localStorage.getItem("epd_theme") || "auto";
+        var isDark = saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <!-- 顶部状态栏 (自适应日/夜主题顶栏) -->
+  <header>
+    <div class="header-inner">
+      <div class="logo-group">
+        <div class="logo-icon">📟</div>
+        <div>
+          <h1>EPD 墨水屏服务中心</h1>
+          <div class="subtitle">4.2寸三色 (400×300) · 按需零通信排程与即时插播</div>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div class="status-badges-wrap">
+          <span class="status-badge" id="activeModeBadge">当前生效: 载入中...</span>
+          <span class="status-badge" id="nextPullBadge">下次刷新: --</span>
+        </div>
+        <div class="theme-switcher" id="themeSwitcher" role="group" aria-label="界面主题切换">
+          <button type="button" class="theme-btn" data-theme-pref="auto" title="跟随系统自动切换日间/夜间模式">🌗 自动</button>
+          <button type="button" class="theme-btn" data-theme-pref="light" title="强制使用高对比浅色模式">☀️ 日间</button>
+          <button type="button" class="theme-btn" data-theme-pref="dark" title="强制使用深色护眼模式">🌙 夜间</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- 顶部功能标签 (排程第一、相册第二、便签第三、设置第四) -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab-schedule">⏰ 24H 自由排程</button>
+      <button class="tab-btn" data-tab="tab-album">📷 相册工作台 (3卡槽)</button>
+      <button class="tab-btn" data-tab="tab-memo">📌 桌面即时便签</button>
+      <button class="tab-btn" data-tab="tab-settings">⚙️ 系统设置与网关</button>
+    </div>
+
+    <!-- 标签 1: 24小时自由排程 -->
+    <div id="tab-schedule" class="tab-content active">
+      <!-- 全局日历异常告警条 (仅在日历同步失败时醒目提示) -->
+      <div id="calendarGlobalAlert" class="alert alert-warning" style="display: none; margin-bottom: 16px;">
+        <span style="font-size: 16px;">⚠️</span>
+        <div style="flex: 1;">
+          <b>iCal 在线日历同步异常:</b> <span id="calendarGlobalAlertMsg">连接受限</span>
+          <span style="margin-left: 8px; font-size: 12px; opacity: 0.85;">(可在「系统设置与网关」中重新测试或检查订阅链接)</span>
+        </div>
+        <button type="button" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="document.getElementById('calendarGlobalAlert').style.display='none'">忽略</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>📊 24小时全天候时间轴可视化</span>
+        </div>
+        <div class="timeline-bar" id="timelineBar"></div>
+        <div class="timeline-ticks">
+          <span>00:00</span>
+          <span>04:00</span>
+          <span>08:00</span>
+          <span>12:00</span>
+          <span>16:00</span>
+          <span>20:00</span>
+          <span>24:00</span>
+        </div>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">
+          <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:4px;"></span>🖼️ 相册轮播</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px;margin-right:4px;"></span>📅 今日日程 (iCal)</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-right:4px;"></span>⛅ 天气日期</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#8b5cf6;border-radius:2px;margin-right:4px;"></span>📆 硬件原生万年历</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#64748b;border-radius:2px;margin-right:4px;"></span>🌙 免打扰 (驻留原画面)</span>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <!-- 排程规则列表 -->
+        <div class="card">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 当前排程规则</span>
+            <div style="display: flex; gap: 8px;">
+              <button id="sortRulesBtn" class="btn btn-outline" style="padding: 4px 10px; font-size: 12px; cursor: pointer;" title="子时段自动置于长时段上方，无重叠时段按开始时间升序排列">🕒 智能时间排序</button>
+            </div>
+          </div>
+          <div id="ruleListContainer">
+            <!-- 动态渲染规则列表 -->
+          </div>
+
+          <div style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+            <label for="fallbackModeSelect">未在任何时段内的闲时兜底模式:</label>
+            <select id="fallbackModeSelect">
+              <option value="photo_album">🖼️ 相册轮播</option>
+              <option value="weather_date">⛅ 天气与日期</option>
+              <option value="calendar_todo">📅 今日日程 (iCal 看板)</option>
+              <option value="clock">📆 硬件原生万年历 (农历/节气)</option>
+              <option value="sleep_dnd">🌙 免打扰休眠 (保持原画面/零通信)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 添加新时段规则 -->
+        <div class="card">
+          <div class="card-title">
+            <span>➕ 添加自定义时段规则</span>
+          </div>
+
+          <div class="form-group">
+            <label for="newRuleName">时段名称 (如: 上午专注、傍晚相册)</label>
+            <input type="text" id="newRuleName" placeholder="例如: 下午办公" maxlength="100">
+          </div>
+
+          <div class="time-range-grid">
+            <div class="form-group">
+              <label for="newRuleStart">开始时间</label>
+              <input type="time" id="newRuleStart" value="13:30">
+            </div>
+            <div class="form-group">
+              <label for="newRuleEnd">结束时间</label>
+              <input type="time" id="newRuleEnd" value="18:00">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="newRuleMode">展示模式</label>
+            <select id="newRuleMode">
+              <option value="photo_album">🖼️ 相册轮播 (Photo Album)</option>
+              <option value="weather_date">⛅ 天气与日期 (wttr.in 实时气象)</option>
+              <option value="calendar_todo">📅 今日日程 (iCal 同步看板)</option>
+              <option value="clock">📆 硬件原生万年历 (nRF片上农历/节气)</option>
+              <option value="sleep_dnd">🌙 免打扰休眠 (保持原画面/零通信)</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="rotateIntervalGroup">
+            <label for="newRuleRotateMin">相册轮换间隔 (分钟)</label>
+            <input type="number" id="newRuleRotateMin" value="60" min="10" max="1440" step="1">
+          </div>
+
+          <div id="newRuleConflictHint" style="display: none; margin-bottom: 14px; font-size: 12px; border-radius: 6px; padding: 8px 12px; line-height: 1.4;"></div>
+
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="autoSortCheckbox" checked>
+              <span>保存时自动按时段优先级与时间排序（子时段优先，避免遮挡）</span>
+            </label>
+          </div>
+
+          <button class="btn btn-primary" id="addRuleBtn" style="width: 100%;">保存并加入排程</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 2: 相册工作台与三色调优 -->
+    <div id="tab-album" class="tab-content">
+      <div class="grid-2">
+        <!-- 左侧调优面板 -->
+        <div class="card">
+          <div class="card-title">
+            <span>🎨 图像微调与抖动算法</span>
+          </div>
+
+          <div class="form-group">
+            <label for="imageFileInput">选择本地图片 (PNG / JPG / WebP)</label>
+            <input type="file" id="imageFileInput" accept="image/png,image/jpeg,image/webp">
+          </div>
+
+          <div class="form-group">
+            <label>对比度增强: <span id="contrastVal" class="range-val">1.2</span></label>
+            <div class="range-wrap">
+              <input type="range" id="contrastRange" min="0.5" max="2.5" step="0.1" value="1.2">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="algSelect">抖动算法</label>
+            <select id="algSelect">
+              <option value="floydSteinberg">Floyd-Steinberg 误差扩散 (自然平滑)</option>
+              <option value="atkinson">Atkinson 算法 (高反差艺术感，推荐写真/人像)</option>
+              <option value="none">无抖动 (纯阈值切割)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>抖动强度: <span id="strengthVal" class="range-val">1.0</span></label>
+            <div class="range-wrap">
+              <input type="range" id="strengthRange" min="0.2" max="2.0" step="0.1" value="1.0">
+            </div>
+          </div>
+
+          <div id="saveSlotButtons" style="display: none; flex-direction: column; gap: 8px; margin-top: 20px;">
+            <label style="font-weight: 600; color: var(--accent-primary);">保存调优效果至服务器卡槽:</label>
+            <div class="action-row">
+              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(1)">存入卡槽 1</button>
+              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(2)">存入卡槽 2</button>
+              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(3)">存入卡槽 3</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧画布仿真预览 (OpenInk 拟物双层外壳) -->
+        <div class="card">
+          <div class="card-title">
+            <span>🖥️ 4.2寸三色墨水屏物理仿真预览</span>
+            <span style="font-size: 12px; color: var(--text-muted);">400 × 300 BWR</span>
+          </div>
+          <div class="canvas-wrapper">
+            <div class="eink-bezel">
+              <canvas id="previewCanvas" width="400" height="300"></canvas>
+            </div>
+            <div class="canvas-hint">仿真红/黑/白三色微米颗粒发色，所见即物理上屏效果</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下方卡槽状态展示 -->
+      <div class="card">
+        <div class="card-title">
+          <span>🗄️ 服务器现存照片卡槽 (支持按设定时间轮播)</span>
+        </div>
+        <div class="slots-grid" id="slotsContainer">
+          <!-- 动态加载卡槽 1, 2, 3 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 3: 桌面即时便签 -->
+    <div id="tab-memo" class="tab-content">
+      <!-- 当前生效便签 -->
+      <div id="activeMemoCard" class="card active-memo-card" style="display: none;">
+        <div class="card-title">
+          <span id="activeMemoTitle">📌 正在置顶展示便签</span>
+          <button class="btn btn-red" id="clearMemoBtn" style="padding: 4px 12px; font-size: 13px;">撤回并恢复排程</button>
+        </div>
+        <div id="activeMemoText" style="font-size: 18px; font-weight: 600; margin-bottom: 10px; white-space: pre-wrap; color: var(--text-main);"></div>
+        <div id="activeMemoExpire" style="font-size: 12px; color: var(--text-muted);"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>✏️ 发布即时备忘便签 (插播覆盖)</span>
+          </div>
+
+          <form id="memoPushForm">
+            <div class="form-group">
+              <label for="memoTitleInput">便签标题</label>
+              <input type="text" id="memoTitleInput" value="📌 桌面备忘提醒" maxlength="80">
+            </div>
+
+            <div class="form-group">
+              <label for="memoTextInput">备忘正文 (字数自适应排版)</label>
+              <textarea id="memoTextInput" rows="4" maxlength="4000" placeholder="例如: 今晚记得取菜鸟驿站快递，取件码 5-2-108。"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>展示保留时长: <span id="memoDurationVal" class="range-val">120</span> 分钟</label>
+              <div class="range-wrap">
+                <input type="range" id="memoDurationSlider" min="15" max="720" step="15" value="120">
+              </div>
+              <div class="action-row" style="margin-top: 8px;">
+                <button type="button" class="btn btn-outline duration-preset" data-min="30" style="padding: 4px 10px; font-size: 11px;">30分钟</button>
+                <button type="button" class="btn btn-outline duration-preset" data-min="60" style="padding: 4px 10px; font-size: 11px;">1小时</button>
+                <button type="button" class="btn btn-outline duration-preset" data-min="120" style="padding: 4px 10px; font-size: 11px;">2小时</button>
+                <button type="button" class="btn btn-outline duration-preset" data-min="240" style="padding: 4px 10px; font-size: 11px;">4小时</button>
+                <button type="button" class="btn btn-outline duration-preset" data-min="720" style="padding: 4px 10px; font-size: 11px;">12小时</button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-red" style="width: 100%; margin-top: 10px;">
+              🚀 立即推送到墨水屏 (10秒内刷新)
+            </button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>📱 手机捷径 / 外部推送接口说明</span>
+          </div>
+          <div style="font-size: 13px; color: var(--text-muted); line-height: 1.7;">
+            <p style="margin-bottom: 12px;">你可以通过 <b>iPhone 快捷指令</b>、<b>Home Assistant</b> 或任何脚本直接调用本服务的推送接口：</p>
+
+            <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-family: monospace; font-size: 12px; word-break: break-all;">
+              <span style="color: var(--accent-primary);">GET</span> /api/push?text=内容&duration_min=120
+            </div>
+
+            <p style="margin-bottom: 8px;"><b>iOS 快捷指令极速配置示例:</b></p>
+            <ol style="padding-left: 20px; margin-bottom: 12px;">
+              <li>新增快捷指令，添加「要求输入文本」；</li>
+              <li>添加「获取 URL 内容」，填写上述 URL；</li>
+              <li>放置到桌面小组件或锁屏界面，一键上屏。</li>
+            </ol>
+
+            <div class="alert alert-info" style="margin-bottom: 0;">
+              💡 每次推送后，服务端会自动通过局域网触发 ESP32 网关刷新，墨水屏无需等待漫长的休眠周期即可秒级响应！
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 4: 系统设置与网关联动 -->
+    <div id="tab-settings" class="tab-content">
+      <div class="grid-2">
+        <!-- 左栏: 核心配置 -->
+        <div class="card">
+          <div class="card-title">
+            <span>⚙️ 核心与天气配置</span>
+          </div>
+
+          <form id="settingsForm">
+            <div class="form-group">
+              <label for="gatewayUrlInput">ESP32 网关局域网地址 (用于即时联动刷新)</label>
+              <input type="text" id="gatewayUrlInput" placeholder="http://192.168.1.100" maxlength="512" required>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                当有即时便签或排程变更时，服务端将主动向此网关的 <code>/api/trigger</code> 发起唤醒请求。
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="weatherCityInput">天气城市配置 (留空默认按公网 IP 自动定位，如 Beijing / Shanghai / 广州)</label>
+              <input type="text" id="weatherCityInput" placeholder="留空自动定位，或输入拼音/英文城市名 (如: Beijing)" maxlength="100">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                使用免费无需 API Key 的 <code>wttr.in</code> 服务，排程处于天气模式时自动定时更新。
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="weatherEntityInput">Home Assistant 天气实体 ID (可选，如 weather.home)</label>
+              <input type="text" id="weatherEntityInput" placeholder="如: weather.home (留空则使用上方 wttr.in 天气)" maxlength="255">
+            </div>
+
+            <div class="form-group">
+              <label for="indoorTempEntityInput">Home Assistant 室内温度传感器实体 ID (可选，替代体感温度行)</label>
+              <input type="text" id="indoorTempEntityInput" placeholder="如: sensor.workroom_temperature" maxlength="255">
+            </div>
+
+            <div class="form-group">
+              <label for="indoorHumidityEntityInput">Home Assistant 室内湿度传感器实体 ID (可选，替代相对湿度行)</label>
+              <input type="text" id="indoorHumidityEntityInput" placeholder="如: sensor.workroom_humidity" maxlength="255">
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%;">保存核心与天气设置</button>
+          </form>
+        </div>
+
+        <!-- 右栏: 日历配置与网关调试 -->
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+          <!-- 📅 iCal 在线日历配置 -->
+          <div class="card">
+            <div class="card-title">
+              <span>📅 在线日历配置 (iCal / Webcal)</span>
+            </div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+              支持订阅 Apple Calendar、Google Calendar、Outlook 或飞书等日历链接，墨水屏将按时段呈现今日日程。
+            </p>
+
+            <div class="form-group">
+              <label for="calendarIcalUrlInput">iCal 日历订阅链接 (URL)</label>
+              <input type="text" id="calendarIcalUrlInput" placeholder="webcal://... 或 https://.../basic.ics" maxlength="1024">
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                输入 <code>webcal://</code> 链接将自动重写为安全 HTTPS 协议；若留空则可使用下方 HA 日历实体。
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="calendarEntityInput">Home Assistant 日历实体 ID (可选，当上方 iCal 留空时生效)</label>
+              <input type="text" id="calendarEntityInput" placeholder="如: calendar.personal" maxlength="255">
+            </div>
+
+            <div id="calendarSyncStatus" style="font-size: 12px; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border-color); line-height: 1.5;">
+              正在获取日历状态...
+            </div>
+
+            <div class="action-row" style="margin-bottom: 8px;">
+              <button class="btn btn-primary" id="saveCalendarBtn" style="flex: 1.2;">保存日历链接</button>
+              <button class="btn btn-outline" id="syncCalendarBtn" style="flex: 1;">🔄 立即同步</button>
+              <button class="btn btn-outline" id="previewCalendarBtn" style="flex: 1;">🖼️ 预览画面</button>
+            </div>
+
+            <!-- 日历预览图展开区 -->
+            <div id="calendarPreviewBox" style="display: none; margin-top: 14px; text-align: center; background: var(--bg-secondary); padding: 16px; border-radius: 10px; border: 1px solid var(--border-color);">
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <span>400×300 墨水屏日程渲染预览:</span>
+                <button type="button" id="closeCalendarPreviewBtn" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;">收起</button>
+              </div>
+              <div class="eink-bezel" style="margin: 6px auto;">
+                <img id="calendarPreviewImg" src="" alt="日历画面预览" style="width: 100%; max-width: 400px; display: block; image-rendering: pixelated;">
+              </div>
+            </div>
+          </div>
+
+          <!-- 📡 网关联动与调试 -->
+          <div class="card">
+            <div class="card-title">
+              <span>📡 网关联动与调试</span>
+            </div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+              按需控制 ESP32 网关同步当前排程画面，或直接指令墨水屏切入 nRF 片上硬件万年历：
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              <button class="btn btn-outline" id="testGatewayBtn" style="width: 100%;">
+                ⚡ 立即触发网关同步 (按当前排程刷新)
+              </button>
+              <button class="btn btn-secondary" id="triggerNativeCalBtn" style="width: 100%;">
+                📆 立即切换墨水屏至硬件原生万年历 (0x20 指令)
+              </button>
+            </div>
+
+            <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+              <b>网关拉取接口:</b> <code>GET /api/epd_gateway/screen.bin</code> (兼容 <code>/screen.bin</code>)<br>
+              <b>当前设备分辨率:</b> 400 × 300 (4.2寸 三色 BWR)<br>
+              <b>省电通信机制:</b> 免打扰与未变更画面直接返回 304 零蓝牙通信
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/api/epd_gateway/static/js/dithering.js?v=20261030_ha1"></script>
+  <script src="/api/epd_gateway/static/js/app.js?v=20261030_ha1"></script>
+</body>
+</html>
