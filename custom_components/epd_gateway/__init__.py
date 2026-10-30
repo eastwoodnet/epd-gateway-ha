@@ -53,9 +53,10 @@ from .http_views import register_http_views
 
 try:
     from homeassistant.helpers import config_validation as cv
-    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 except ImportError:
-    CONFIG_SCHEMA = None
+    cv = None  # type: ignore[assignment]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN) if cv is not None else None
 
 _LOGGER = logging.getLogger(__name__)
 
