@@ -19,6 +19,8 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   validate-hassfest:
     name: Hassfest

@@ -3,12 +3,12 @@
   "name": "EPD 墨水屏无线网关 (EPD Gateway)",
   "codeowners": ["@eastwoodnet"],
   "config_flow": true,
+  "categories": ["diy_makers", "productivity_information"],
   "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/eastwoodnet/epd-gateway-ha",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/eastwoodnet/epd-gateway-ha/issues",
   "requirements": [
-    "Pillow>=10.0.0",
     "httpx>=0.25.0",
     "icalendar>=5.0.0",
     "python-dateutil>=2.8.2",

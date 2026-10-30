@@ -51,6 +51,12 @@ from .const import (
 from .coordinator import EpdGatewayCoordinator
 from .http_views import register_http_views
 
+try:
+    from homeassistant.helpers import config_validation as cv
+    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+except ImportError:
+    CONFIG_SCHEMA = None
+
 _LOGGER = logging.getLogger(__name__)
 
 
