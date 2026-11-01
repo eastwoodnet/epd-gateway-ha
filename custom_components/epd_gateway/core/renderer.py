@@ -537,13 +537,13 @@ def render_weather_image(weather_data: dict, width: int = 400, height: int = 300
             vl(x + 122, 222, 270)
 
     hl(278, 0, width - 1, 1)
-    ut = str(weather_data.get("update_time", time.strftime("%H:%M")))
-    try:
-        hh, mm = ut.split(":")
-        ut_txt = f"{int(hh)}时{int(mm)}分"
-    except ValueError:
-        ut_txt = ut
-    T((width // 2, 289), f"更新于{ut_txt}" + (" (缓存)" if weather_data.get("stale") else ""), 14, anchor="mm")
+    source_raw = str(weather_data.get("source", "wttr.in"))
+    if source_raw.startswith("weather.") or source_raw.startswith("sensor."):
+        source_label = "Home Assistant"
+    else:
+        source_label = clean_text(source_raw)
+    stale_suffix = " (离线缓存)" if weather_data.get("stale") else ""
+    T((width // 2, 289), f"实况气象与环境数据 · {source_label}{stale_suffix}", 14, anchor="mm")
 
     return image_to_raw(img, width, height)
 
@@ -664,23 +664,22 @@ def render_calendar_image(calendar_data: dict, width: int = 400, height: int = 3
     is_mock = calendar_data.get("is_mock", False)
     stale = calendar_data.get("stale", False)
     status = calendar_data.get("status", "ok")
-    ut = calendar_data.get("update_time", now.strftime("%H:%M"))
     total_cnt = len(events)
 
     if status == "error":
         err_detail = calendar_data.get("error_detail") or calendar_data.get("message", "网络连接异常")
         if total_cnt == 0:
-            status_text = f"● 同步异常({err_detail[:18]}) · 更新于 {ut}"
+            status_text = f"● 日历同步异常({clean_text(str(err_detail)[:18])})"
         else:
-            status_text = f"● 离线缓存({total_cnt}项) · 同步异常({err_detail[:14]})"
+            status_text = f"● 离线缓存({total_cnt}项) · 异常({clean_text(str(err_detail)[:14])})"
     elif is_mock:
-        status_text = f"● 模拟日程({total_cnt}项) · 未配置URL · {ut}"
+        status_text = f"● 模拟日程({total_cnt}项) · 未配置URL"
     elif total_cnt == 0:
-        status_text = f"● 今日暂无日程 · 更新于 {ut}"
+        status_text = "● 今日暂无日程安排 · 已与日历同步"
     elif stale:
-        status_text = f"● 今日共 {total_cnt} 项日程 · 更新于 {ut} (离线缓存)"
+        status_text = f"● 今日共 {total_cnt} 项日程 · 离线缓存"
     else:
-        status_text = f"● 今日共 {total_cnt} 项日程 · 更新于 {ut}"
+        status_text = f"● 今日共 {total_cnt} 项日程 · 已与日历同步"
 
     T((14, 288), status_text, 14, BLK, False, "lm")
 

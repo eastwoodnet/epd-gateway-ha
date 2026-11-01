@@ -45,13 +45,14 @@ _LOGGER = logging.getLogger(__name__)
 def etag_matches(header_value: Optional[str], etag: str) -> bool:
     if not header_value:
         return False
+    target = etag.strip('"')
     for candidate in header_value.split(","):
         candidate = candidate.strip()
         if candidate == "*":
             return True
         if candidate.startswith("W/"):
             candidate = candidate[2:].strip()
-        if candidate == etag:
+        if candidate == etag or candidate.strip('"') == target:
             return True
     return False
 
