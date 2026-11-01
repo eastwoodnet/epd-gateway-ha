@@ -137,6 +137,13 @@ def validate_user_input(user_input: Dict[str, Any]) -> tuple[Dict[str, Any], Dic
     return cleaned, errors
 
 
+def _opt_suggested(key: str, val: Any) -> vol.Optional:
+    """Helper to attach suggested_value only when a non-empty default is present."""
+    if val not in (None, "", getattr(vol, "UNDEFINED", object())):
+        return vol.Optional(key, description={"suggested_value": val})
+    return vol.Optional(key)
+
+
 def _build_schema(defaults: Dict[str, Any]) -> vol.Schema:
     gw_default = defaults.get(CONF_GATEWAY_URL, DEFAULT_GATEWAY_URL)
     weather_ent_default = defaults.get(CONF_WEATHER_ENTITY, "")
@@ -148,34 +155,32 @@ def _build_schema(defaults: Dict[str, Any]) -> vol.Schema:
     panel_default = defaults.get(CONF_REGISTER_PANEL, DEFAULT_REGISTER_PANEL)
 
     if HAS_HA_SELECTOR:
-        return vol.Schema(
-            {
-                vol.Required(CONF_GATEWAY_URL, default=gw_default): str,
-                vol.Optional(CONF_WEATHER_ENTITY, default=weather_ent_default): vol.Any(
-                    None,
-                    "",
-                    selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
-                ),
-                vol.Optional(CONF_INDOOR_TEMP_ENTITY, default=indoor_t_default): vol.Any(
-                    None,
-                    "",
-                    selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-                ),
-                vol.Optional(CONF_INDOOR_HUMIDITY_ENTITY, default=indoor_h_default): vol.Any(
-                    None,
-                    "",
-                    selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-                ),
-                vol.Optional(CONF_CALENDAR_ENTITY, default=cal_ent_default): vol.Any(
-                    None,
-                    "",
-                    selector.EntitySelector(selector.EntitySelectorConfig(domain="calendar")),
-                ),
-                vol.Optional(CONF_WEATHER_CITY, default=city_default): str,
-                vol.Optional(CONF_CALENDAR_ICAL_URL, default=ical_default): str,
-                vol.Optional(CONF_REGISTER_PANEL, default=panel_default): bool,
-            }
-        )
+        schema_dict: Dict[Any, Any] = {
+            vol.Required(
+                CONF_GATEWAY_URL,
+                description={"suggested_value": gw_default},
+            ): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.URL)),
+            _opt_suggested(CONF_WEATHER_ENTITY, weather_ent_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="weather")
+            ),
+            _opt_suggested(CONF_INDOOR_TEMP_ENTITY, indoor_t_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            _opt_suggested(CONF_INDOOR_HUMIDITY_ENTITY, indoor_h_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            _opt_suggested(CONF_CALENDAR_ENTITY, cal_ent_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="calendar")
+            ),
+            _opt_suggested(CONF_WEATHER_CITY, city_default): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+            ),
+            _opt_suggested(CONF_CALENDAR_ICAL_URL, ical_default): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+            ),
+            _opt_suggested(CONF_REGISTER_PANEL, panel_default): selector.BooleanSelector(),
+        }
+        return vol.Schema(schema_dict)
 
     return vol.Schema(
         {
