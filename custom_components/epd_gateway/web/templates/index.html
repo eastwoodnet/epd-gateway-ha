@@ -31,6 +31,7 @@
         <div class="status-badges-wrap">
           <span class="status-badge" id="activeModeBadge">当前生效: 载入中...</span>
           <span class="status-badge" id="nextPullBadge">下次刷新: --</span>
+          <button type="button" class="btn btn-primary" id="headerSyncBtn" style="padding: 4px 12px; font-size: 12px; border-radius: 999px; margin-left: 6px; cursor: pointer;" title="立即唤醒网关拉取并全刷墨水屏">⚡ 刷新墨水屏</button>
         </div>
         <div class="theme-switcher" id="themeSwitcher" role="group" aria-label="界面主题切换">
           <button type="button" class="theme-btn" data-theme-pref="auto" title="跟随系统自动切换日间/夜间模式">🌗 自动</button>
@@ -42,12 +43,12 @@
   </header>
 
   <div class="container">
-    <!-- 顶部功能标签 (排程第一、相册第二、便签第三、设置第四) -->
+    <!-- 顶部功能标签 (排程第一、相册第二、便签第三、画廊第四) -->
     <div class="tabs">
       <button class="tab-btn active" data-tab="tab-schedule">⏰ 24H 自由排程</button>
       <button class="tab-btn" data-tab="tab-album">📷 相册工作台 (3卡槽)</button>
       <button class="tab-btn" data-tab="tab-memo">📌 桌面即时便签</button>
-      <button class="tab-btn" data-tab="tab-settings">⚙️ 系统设置与网关</button>
+      <button class="tab-btn" data-tab="tab-settings">🖼️ 看板画廊与调试</button>
     </div>
 
     <!-- 标签 1: 24小时自由排程 -->
@@ -57,7 +58,7 @@
         <span style="font-size: 16px;">⚠️</span>
         <div style="flex: 1;">
           <b>iCal 在线日历同步异常:</b> <span id="calendarGlobalAlertMsg">连接受限</span>
-          <span style="margin-left: 8px; font-size: 12px; opacity: 0.85;">(可在「系统设置与网关」中重新测试或检查订阅链接)</span>
+          <span style="margin-left: 8px; font-size: 12px; opacity: 0.85;">(可在「看板画廊与调试」或 Home Assistant 集成配置中检查)</span>
         </div>
         <button type="button" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="document.getElementById('calendarGlobalAlert').style.display='none'">忽略</button>
       </div>
@@ -310,137 +311,84 @@
       </div>
     </div>
 
-    <!-- 标签 4: 系统设置与网关联动 -->
+    <!-- 标签 4: 看板画廊与快捷调试 -->
     <div id="tab-settings" class="tab-content">
-      <div class="grid-2">
-        <!-- 左栏: 核心配置 -->
-        <div class="card">
-          <div class="card-title">
-            <span>⚙️ 核心与天气配置</span>
-          </div>
-
-          <form id="settingsForm">
-            <div class="form-group">
-              <label for="gatewayUrlInput">ESP32 网关局域网地址 (用于即时联动刷新)</label>
-              <input type="text" id="gatewayUrlInput" placeholder="http://192.168.1.100" maxlength="512" required>
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                当有即时便签或排程变更时，服务端将主动向此网关的 <code>/api/trigger</code> 发起唤醒请求。
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="weatherCityInput">天气城市配置 (留空默认按公网 IP 自动定位，如 Beijing / Shanghai / 广州)</label>
-              <input type="text" id="weatherCityInput" placeholder="留空自动定位，或输入拼音/英文城市名 (如: Beijing)" maxlength="100">
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                使用免费无需 API Key 的 <code>wttr.in</code> 服务，排程处于天气模式时自动定时更新。
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="weatherEntityInput">Home Assistant 天气实体 ID (可选，如 weather.home)</label>
-              <input type="text" id="weatherEntityInput" placeholder="如: weather.home (留空则使用上方 wttr.in 天气)" maxlength="255">
-            </div>
-
-            <div class="form-group">
-              <label for="indoorTempEntityInput">Home Assistant 室内温度传感器实体 ID (可选，替代体感温度行)</label>
-              <input type="text" id="indoorTempEntityInput" placeholder="如: sensor.workroom_temperature" maxlength="255">
-            </div>
-
-            <div class="form-group">
-              <label for="indoorHumidityEntityInput">Home Assistant 室内湿度传感器实体 ID (可选，替代相对湿度行)</label>
-              <input type="text" id="indoorHumidityEntityInput" placeholder="如: sensor.workroom_humidity" maxlength="255">
-            </div>
-
-            <div class="action-row" style="margin-top: 16px; margin-bottom: 8px;">
-              <button type="submit" class="btn btn-primary" style="flex: 1.2;">保存天气设置</button>
-              <button type="button" class="btn btn-outline" id="refreshWeatherBtn" style="flex: 1;">🔄 刷新数据</button>
-              <button type="button" class="btn btn-outline" id="previewWeatherBtn" style="flex: 1;">🖼️ 预览早报</button>
-              <button type="button" class="btn btn-secondary" id="pushWeatherNowBtn" style="flex: 1.2;">⛅ 立即推送</button>
-            </div>
-
-            <!-- 天气早报预览图展开区 -->
-            <div id="weatherPreviewBox" style="display: none; margin-top: 14px; text-align: center; background: var(--bg-secondary); padding: 16px; border-radius: 10px; border: 1px solid var(--border-color);">
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
-                <span>400×300 天气早报渲染预览 (含室内温湿度):</span>
-                <button type="button" id="closeWeatherPreviewBtn" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;">收起</button>
-              </div>
-              <div class="eink-bezel" style="margin: 6px auto;">
-                <img id="weatherPreviewImg" src="" alt="天气早报预览" style="width: 100%; max-width: 400px; display: block; image-rendering: pixelated;">
-              </div>
-            </div>
-          </form>
+      <!-- 统一配置指引提示条 -->
+      <div class="alert alert-info" style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div style="font-size: 13px; line-height: 1.6;">
+          ⚙️ <b>系统配置已归集:</b> 网关 IP (<code id="gatewayUrlDisplay">--</code>)、HA 天气/日历/温湿度实体绑定、城市与 iCal 链接现已统一在 <b>Home Assistant「设置 → 设备与服务 → EPD 墨水屏 → 配置」</b> 中集中管理。
         </div>
+      </div>
 
-        <!-- 右栏: 日历配置与网关调试 -->
-        <div style="display: flex; flex-direction: column; gap: 24px;">
-          <!-- 📅 iCal 在线日历配置 -->
-          <div class="card">
+      <div class="grid-2">
+        <!-- 左卡片: 早安天气实况看板画廊 -->
+        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
             <div class="card-title">
-              <span>📅 在线日历配置 (iCal / Webcal)</span>
+              <span>🌤️ 早安天气实况看板</span>
+              <span style="font-size: 12px; font-weight: normal; color: var(--text-muted);">400 × 300 原生点阵</span>
             </div>
             <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
-              支持订阅 Apple Calendar、Google Calendar、Outlook 或飞书等日历链接，墨水屏将按时段呈现今日日程。
+              当前实况气象、温差预报与室内温湿度传感器的实时渲染点阵预览。
             </p>
 
-            <div class="form-group">
-              <label for="calendarIcalUrlInput">iCal 日历订阅链接 (URL)</label>
-              <input type="text" id="calendarIcalUrlInput" placeholder="webcal://... 或 https://.../basic.ics" maxlength="1024">
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                输入 <code>webcal://</code> 链接将自动重写为安全 HTTPS 协议；若留空则可使用下方 HA 日历实体。
-              </div>
+            <div class="eink-bezel" style="margin: 8px auto 16px; text-align: center; display: flex; justify-content: center;">
+              <img id="weatherPreviewImg" src="" alt="早安天气预览" style="width: 100%; max-width: 380px; display: block; image-rendering: pixelated; border-radius: 4px; background: #fff;">
             </div>
+          </div>
 
-            <div class="form-group">
-              <label for="calendarEntityInput">Home Assistant 日历实体 ID (可选，当上方 iCal 留空时生效)</label>
-              <input type="text" id="calendarEntityInput" placeholder="如: calendar.personal" maxlength="255">
+          <div class="action-row" style="margin-top: 10px;">
+            <button type="button" class="btn btn-outline" id="refreshWeatherBtn" style="flex: 1;">🔄 重新获取天气</button>
+            <button type="button" class="btn btn-secondary" id="pushWeatherNowBtn" style="flex: 1.2;">⛅ 立即推送到屏幕</button>
+          </div>
+        </div>
+
+        <!-- 右卡片: 今日日程安排看板画廊 -->
+        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <div class="card-title">
+              <span>📅 今日日程安排看板</span>
+              <span style="font-size: 12px; font-weight: normal; color: var(--text-muted);">400 × 300 原生点阵</span>
             </div>
-
-            <div id="calendarSyncStatus" style="font-size: 12px; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border-color); line-height: 1.5;">
+            <div id="calendarSyncStatus" style="font-size: 12px; margin-bottom: 12px; padding: 6px 10px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border-color); line-height: 1.5;">
               正在获取日历状态...
             </div>
 
-            <div class="action-row" style="margin-bottom: 8px;">
-              <button class="btn btn-primary" id="saveCalendarBtn" style="flex: 1.2;">保存日历链接</button>
-              <button class="btn btn-outline" id="syncCalendarBtn" style="flex: 1;">🔄 立即同步</button>
-              <button class="btn btn-outline" id="previewCalendarBtn" style="flex: 1;">🖼️ 预览画面</button>
-            </div>
-
-            <!-- 日历预览图展开区 -->
-            <div id="calendarPreviewBox" style="display: none; margin-top: 14px; text-align: center; background: var(--bg-secondary); padding: 16px; border-radius: 10px; border: 1px solid var(--border-color);">
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
-                <span>400×300 墨水屏日程渲染预览:</span>
-                <button type="button" id="closeCalendarPreviewBtn" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;">收起</button>
-              </div>
-              <div class="eink-bezel" style="margin: 6px auto;">
-                <img id="calendarPreviewImg" src="" alt="日历画面预览" style="width: 100%; max-width: 400px; display: block; image-rendering: pixelated;">
-              </div>
+            <div class="eink-bezel" style="margin: 8px auto 16px; text-align: center; display: flex; justify-content: center;">
+              <img id="calendarPreviewImg" src="" alt="今日日程预览" style="width: 100%; max-width: 380px; display: block; image-rendering: pixelated; border-radius: 4px; background: #fff;">
             </div>
           </div>
 
-          <!-- 📡 网关联动与调试 -->
-          <div class="card">
-            <div class="card-title">
-              <span>📡 网关联动与调试</span>
-            </div>
-            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-              按需控制 ESP32 网关同步当前排程画面，或直接指令墨水屏切入 nRF 片上硬件万年历：
-            </p>
-
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
-              <button class="btn btn-outline" id="testGatewayBtn" style="width: 100%;">
-                ⚡ 立即触发网关同步 (按当前排程刷新)
-              </button>
-              <button class="btn btn-secondary" id="triggerNativeCalBtn" style="width: 100%;">
-                📆 立即切换墨水屏至硬件原生万年历 (0x20 指令)
-              </button>
-            </div>
-
-            <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
-              <b>网关拉取接口:</b> <code>GET /api/epd_gateway/screen.bin</code> (兼容 <code>/screen.bin</code>)<br>
-              <b>当前设备分辨率:</b> 400 × 300 (4.2寸 三色 BWR)<br>
-              <b>省电通信机制:</b> 免打扰与未变更画面直接返回 304 零蓝牙通信
-            </div>
+          <div class="action-row" style="margin-top: 10px;">
+            <button type="button" class="btn btn-outline" id="syncCalendarBtn" style="flex: 1;">🔄 重新同步日历</button>
+            <button type="button" class="btn btn-secondary" id="pushCalendarNowBtn" style="flex: 1.2;">📅 立即推送到屏幕</button>
           </div>
+        </div>
+      </div>
+
+      <!-- 底部: 网关联动与快捷调试工具箱 -->
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-title">
+          <span>📡 网关联动与快捷调试</span>
+          <span style="font-size: 12px; color: var(--text-muted);">网关地址: <code id="gatewayUrlFooter">--</code></span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5;">
+          主动唤醒 ESP32 网关同步当前排程画面，或切换墨水屏底层硬件指令：
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <button class="btn btn-outline" id="testGatewayBtn" style="padding: 10px 14px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            ⚡ 立即触发网关同步 (按当前排程刷新)
+          </button>
+          <button class="btn btn-secondary" id="triggerNativeCalBtn" style="padding: 10px 14px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            📆 切换至硬件原生万年历 (0x20 指令)
+          </button>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6; padding-top: 10px; border-top: 1px solid var(--border-color);">
+          <b>网关拉取接口:</b> <code>GET /api/epd_gateway/screen.bin</code> (兼容 <code>/screen.bin</code>) &nbsp;|&nbsp;
+          <b>屏幕分辨率:</b> 400 × 300 (4.2寸 三色 BWR) &nbsp;|&nbsp;
+          <b>省电通信机制:</b> 画面未变更时精准返回 304 零蓝牙通信
         </div>
       </div>
     </div>

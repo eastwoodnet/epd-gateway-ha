@@ -1272,69 +1272,85 @@ async function updateCalendarStatusDisplay() {
 }
 
 function initSettingsForm() {
-  // 核心与天气表单
-  document.getElementById("settingsForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const gatewayUrl = document.getElementById("gatewayUrlInput").value.trim();
-    const weatherCity = document.getElementById("weatherCityInput") ? document.getElementById("weatherCityInput").value.trim() : "";
-    const weatherEntity = document.getElementById("weatherEntityInput") ? document.getElementById("weatherEntityInput").value.trim() : "";
-    const indoorTempEntity = document.getElementById("indoorTempEntityInput") ? document.getElementById("indoorTempEntityInput").value.trim() : "";
-    const indoorHumidityEntity = document.getElementById("indoorHumidityEntityInput") ? document.getElementById("indoorHumidityEntityInput").value.trim() : "";
-    const submitButton = e.currentTarget.querySelector('button[type="submit"]');
-    submitButton.disabled = true;
-    try {
-      await requestJson("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          gateway_url: gatewayUrl,
-          weather_city: weatherCity,
-          weather_entity: weatherEntity,
-          indoor_temp_entity: indoorTempEntity,
-          indoor_humidity_entity: indoorHumidityEntity
-        })
-      });
-      alert("核心设置保存成功！");
-    } catch (err) {
-      alert(`保存失败: ${err.message}`);
-    } finally {
-      submitButton.disabled = false;
-    }
-  });
-
-  // 日历保存链接按钮
-  const saveCalBtn = document.getElementById("saveCalendarBtn");
-  if (saveCalBtn) {
-    saveCalBtn.addEventListener("click", async () => {
-      const icalUrl = document.getElementById("calendarIcalUrlInput").value.trim();
-      const calendarEntity = document.getElementById("calendarEntityInput") ? document.getElementById("calendarEntityInput").value.trim() : "";
-      saveCalBtn.disabled = true;
+  // 1. 顶栏常驻刷新按钮
+  const headerSyncBtn = document.getElementById("headerSyncBtn");
+  if (headerSyncBtn) {
+    headerSyncBtn.addEventListener("click", async () => {
+      headerSyncBtn.disabled = true;
+      headerSyncBtn.textContent = "⏳ 刷新中...";
       try {
-        await requestJson("/api/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendar_ical_url: icalUrl, calendar_entity: calendarEntity })
-        });
-        alert("日历设置保存成功！已触发后台自动同步。");
-        await updateCalendarStatusDisplay();
-      } catch (err) {
-        alert(`保存日历设置失败: ${err.message}`);
+        const res = await requestJson("/api/trigger", { method: "POST" });
+        alert(res.message || "已向网关发送唤醒请求！");
+        await loadSchedule();
+      } catch (e) {
+        alert("触发失败: " + e.message);
       } finally {
-        saveCalBtn.disabled = false;
+        headerSyncBtn.disabled = false;
+        headerSyncBtn.textContent = "⚡ 刷新墨水屏";
       }
     });
   }
 
-  // 日历立即同步测试按钮
+  // 2. 早安天气看板刷新与推送
+  const refreshWeatherBtn = document.getElementById("refreshWeatherBtn");
+  const pushWeatherNowBtn = document.getElementById("pushWeatherNowBtn");
+  const weatherPreviewImg = document.getElementById("weatherPreviewImg");
+
+  if (refreshWeatherBtn) {
+    refreshWeatherBtn.addEventListener("click", async () => {
+      refreshWeatherBtn.disabled = true;
+      refreshWeatherBtn.textContent = "⏳ 获取中...";
+      try {
+        const data = await requestJson("/api/weather/refresh", { method: "POST" });
+        if (weatherPreviewImg) {
+          weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
+        }
+        alert(data.message || "天气数据已刷新！");
+      } catch (err) {
+        alert("刷新天气失败: " + err.message);
+      } finally {
+        refreshWeatherBtn.disabled = false;
+        refreshWeatherBtn.textContent = "🔄 重新获取天气";
+      }
+    });
+  }
+
+  if (pushWeatherNowBtn) {
+    pushWeatherNowBtn.addEventListener("click", async () => {
+      pushWeatherNowBtn.disabled = true;
+      pushWeatherNowBtn.textContent = "⏳ 推送中...";
+      try {
+        if (currentScheduleConfig) {
+          const nextConfig = cloneScheduleConfig();
+          nextConfig.fallback_mode = "weather_date";
+          await saveScheduleConfig(nextConfig);
+        }
+        const data = await requestJson("/api/trigger", { method: "POST" });
+        alert(data.message || "⛅ 早安天气看板已切换为当前生效模式并推送到墨水屏！");
+        await loadSchedule();
+      } catch (err) {
+        alert("推送失败: " + err.message);
+      } finally {
+        pushWeatherNowBtn.disabled = false;
+        pushWeatherNowBtn.textContent = "⛅ 立即推送到屏幕";
+      }
+    });
+  }
+
+  // 3. 今日日程看板同步与推送
   const syncCalBtn = document.getElementById("syncCalendarBtn");
+  const pushCalNowBtn = document.getElementById("pushCalendarNowBtn");
+  const calendarPreviewImg = document.getElementById("calendarPreviewImg");
+
   if (syncCalBtn) {
     syncCalBtn.addEventListener("click", async () => {
-      const icalUrl = document.getElementById("calendarIcalUrlInput").value.trim();
       syncCalBtn.disabled = true;
       syncCalBtn.textContent = "正在拉取...";
       try {
-        const query = icalUrl ? `?url=${encodeURIComponent(icalUrl)}` : "";
-        const data = await requestJson(`/api/calendar/refresh${query}`, { method: "POST" });
+        const data = await requestJson("/api/calendar/refresh", { method: "POST" });
+        if (calendarPreviewImg) {
+          calendarPreviewImg.src = resolveApiUrl(`/api/calendar/preview.png?t=${Date.now()}`);
+        }
         if (data.status === "error" || (data.data && data.data.status === "error")) {
           const errMsg = (data.data && data.data.message) || data.message || "拉取失败";
           alert(`⚠️ 同步异常: ${errMsg}`);
@@ -1346,121 +1362,60 @@ function initSettingsForm() {
         alert(`日历同步失败: ${err.message}`);
       } finally {
         syncCalBtn.disabled = false;
-        syncCalBtn.textContent = "🔄 立即同步";
+        syncCalBtn.textContent = "🔄 重新同步日历";
       }
     });
   }
 
-  // 天气早报预览与推送按钮
-  const refreshWeatherBtn = document.getElementById("refreshWeatherBtn");
-  const previewWeatherBtn = document.getElementById("previewWeatherBtn");
-  const weatherPreviewBox = document.getElementById("weatherPreviewBox");
-  const weatherPreviewImg = document.getElementById("weatherPreviewImg");
-  const closeWeatherPreviewBtn = document.getElementById("closeWeatherPreviewBtn");
-  const pushWeatherNowBtn = document.getElementById("pushWeatherNowBtn");
-
-  if (refreshWeatherBtn) {
-    refreshWeatherBtn.addEventListener("click", async () => {
-      refreshWeatherBtn.disabled = true;
-      refreshWeatherBtn.textContent = "⏳ 刷新中...";
+  if (pushCalNowBtn) {
+    pushCalNowBtn.addEventListener("click", async () => {
+      pushCalNowBtn.disabled = true;
+      pushCalNowBtn.textContent = "⏳ 推送中...";
       try {
-        const data = await requestJson("/api/weather/refresh", { method: "POST" });
-        alert(data.message || "天气数据已刷新！");
-        if (weatherPreviewBox && weatherPreviewBox.style.display !== "none" && weatherPreviewImg) {
-          weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
-        }
-      } catch (err) {
-        alert("刷新失败: " + err.message);
-      } finally {
-        refreshWeatherBtn.disabled = false;
-        refreshWeatherBtn.textContent = "🔄 刷新数据";
-      }
-    });
-  }
-
-  if (previewWeatherBtn && weatherPreviewBox && weatherPreviewImg) {
-    previewWeatherBtn.addEventListener("click", () => {
-      weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
-      weatherPreviewBox.style.display = "block";
-    });
-  }
-
-  if (closeWeatherPreviewBtn && weatherPreviewBox) {
-    closeWeatherPreviewBtn.addEventListener("click", () => {
-      weatherPreviewBox.style.display = "none";
-    });
-  }
-
-  if (pushWeatherNowBtn) {
-    pushWeatherNowBtn.addEventListener("click", async () => {
-      pushWeatherNowBtn.disabled = true;
-      pushWeatherNowBtn.textContent = "⏳ 推送中...";
-      try {
-        // 1. 设置闲时兜底模式为天气早报
         if (currentScheduleConfig) {
           const nextConfig = cloneScheduleConfig();
-          nextConfig.fallback_mode = "weather_date";
+          nextConfig.fallback_mode = "calendar_todo";
           await saveScheduleConfig(nextConfig);
         }
-        // 2. 触发网关同步
         const data = await requestJson("/api/trigger", { method: "POST" });
-        alert(data.message || "⛅ 天气早报已切换为当前生效模式并推送到墨水屏！");
+        alert(data.message || "📅 今日日程看板已切换为当前生效模式并推送到墨水屏！");
         await loadSchedule();
       } catch (err) {
         alert("推送失败: " + err.message);
       } finally {
-        pushWeatherNowBtn.disabled = false;
-        pushWeatherNowBtn.textContent = "⛅ 立即推送";
+        pushCalNowBtn.disabled = false;
+        pushCalNowBtn.textContent = "📅 立即推送到屏幕";
       }
     });
   }
 
-  // 日历预览按钮
-  const previewCalBtn = document.getElementById("previewCalendarBtn");
-  const previewBox = document.getElementById("calendarPreviewBox");
-  const previewImg = document.getElementById("calendarPreviewImg");
-  const closeCalPreviewBtn = document.getElementById("closeCalendarPreviewBtn");
-
-  if (previewCalBtn && previewBox && previewImg) {
-    previewCalBtn.addEventListener("click", () => {
-      const icalUrl = document.getElementById("calendarIcalUrlInput").value.trim();
-      const query = icalUrl ? `?url=${encodeURIComponent(icalUrl)}&t=${Date.now()}` : `?t=${Date.now()}`;
-      previewImg.src = resolveApiUrl(`/api/calendar/preview.png${query}`);
-      previewBox.style.display = "block";
-    });
-  }
-
-  if (closeCalPreviewBtn && previewBox) {
-    closeCalPreviewBtn.addEventListener("click", () => {
-      previewBox.style.display = "none";
-    });
-  }
-
-  // 网关手动触发按钮
-  document.getElementById("testGatewayBtn").addEventListener("click", async () => {
-    const btn = document.getElementById("testGatewayBtn");
-    btn.disabled = true;
-    btn.textContent = "正在通知网关...";
-    try {
-      const data = await requestJson("/api/trigger", { method: "POST" });
-      if (!data || data.status !== "ok") {
-        throw new Error(data && data.message ? data.message : "网关触发失败");
+  // 4. 网关手动触发按钮
+  const testGatewayBtn = document.getElementById("testGatewayBtn");
+  if (testGatewayBtn) {
+    testGatewayBtn.addEventListener("click", async () => {
+      testGatewayBtn.disabled = true;
+      testGatewayBtn.textContent = "正在通知网关...";
+      try {
+        const data = await requestJson("/api/trigger", { method: "POST" });
+        if (!data || data.status !== "ok") {
+          throw new Error(data && data.message ? data.message : "网关触发失败");
+        }
+        alert(data.message);
+      } catch (err) {
+        alert(`触发失败: ${err.message}`);
+      } finally {
+        testGatewayBtn.disabled = false;
+        testGatewayBtn.textContent = "⚡ 立即触发网关同步 (按当前排程刷新)";
       }
-      alert(data.message);
-    } catch (err) {
-      alert(`触发失败: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "⚡ 立即触发网关同步 (测试刷新)";
-    }
-  });
+    });
+  }
 
-  // 硬件原生万年历指令触发按钮
+  // 5. 硬件原生万年历指令触发按钮
   const triggerNativeCalBtn = document.getElementById("triggerNativeCalBtn");
   if (triggerNativeCalBtn) {
     triggerNativeCalBtn.addEventListener("click", async () => {
       triggerNativeCalBtn.disabled = true;
-      triggerNativeCalBtn.textContent = "正在下发万年历指令并等待全刷 (约18秒)...";
+      triggerNativeCalBtn.textContent = "正在下发指令并等待全刷 (约18秒)...";
       try {
         const data = await requestJson("/api/device/calendar", { method: "POST" });
         if (!data || data.status !== "ok") {
@@ -1471,7 +1426,7 @@ function initSettingsForm() {
         alert(`切换失败: ${err.message}`);
       } finally {
         triggerNativeCalBtn.disabled = false;
-        triggerNativeCalBtn.textContent = "📆 立即切换墨水屏至硬件原生万年历 (0x20 指令)";
+        triggerNativeCalBtn.textContent = "📆 切换至硬件原生万年历 (0x20 指令)";
       }
     });
   }
@@ -1480,31 +1435,29 @@ function initSettingsForm() {
 async function loadSettings() {
   try {
     const data = await requestJson("/api/settings");
-    if (!data || typeof data.gateway_url !== "string" || !data.gateway_url) {
-      throw new Error("设置响应格式无效");
+    if (!data) return;
+
+    const gwDisplay = document.getElementById("gatewayUrlDisplay");
+    if (gwDisplay) {
+      gwDisplay.textContent = data.gateway_url || "未配置";
     }
-    document.getElementById("gatewayUrlInput").value = data.gateway_url;
-    if (document.getElementById("weatherCityInput")) {
-      document.getElementById("weatherCityInput").value = data.weather_city || "";
+    const gwFooter = document.getElementById("gatewayUrlFooter");
+    if (gwFooter) {
+      gwFooter.textContent = data.gateway_url || "未配置";
     }
-    if (document.getElementById("weatherEntityInput")) {
-      document.getElementById("weatherEntityInput").value = data.weather_entity || "";
+
+    // 载入画廊点阵预览图
+    const wImg = document.getElementById("weatherPreviewImg");
+    if (wImg && (!wImg.src || wImg.src === "" || wImg.src.endsWith("/weather/preview.png") || wImg.src.includes("preview.png"))) {
+      wImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
     }
-    if (document.getElementById("indoorTempEntityInput")) {
-      document.getElementById("indoorTempEntityInput").value = data.indoor_temp_entity || "";
+    const cImg = document.getElementById("calendarPreviewImg");
+    if (cImg && (!cImg.src || cImg.src === "" || cImg.src.endsWith("/calendar/preview.png") || cImg.src.includes("preview.png"))) {
+      cImg.src = resolveApiUrl(`/api/calendar/preview.png?t=${Date.now()}`);
     }
-    if (document.getElementById("indoorHumidityEntityInput")) {
-      document.getElementById("indoorHumidityEntityInput").value = data.indoor_humidity_entity || "";
-    }
-    if (document.getElementById("calendarIcalUrlInput")) {
-      document.getElementById("calendarIcalUrlInput").value = data.calendar_ical_url || "";
-    }
-    if (document.getElementById("calendarEntityInput")) {
-      document.getElementById("calendarEntityInput").value = data.calendar_entity || "";
-    }
+
     await updateCalendarStatusDisplay();
   } catch (err) {
-    console.error("加载系统设置失败:", err);
-    document.getElementById("gatewayUrlInput").placeholder = "设置加载失败，请刷新后重试";
+    console.error("加载系统配置与画廊失败:", err);
   }
 }
