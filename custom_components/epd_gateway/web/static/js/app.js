@@ -1550,7 +1550,8 @@ async function loadSettings() {
     }
     const screenBinEl = byId("screenBinPathDisplay");
     if (screenBinEl && data.screen_bin_path) {
-      screenBinEl.textContent = `GET ${data.screen_bin_path}`;
+      const origin = typeof window !== "undefined" && window.location ? window.location.origin : "";
+      screenBinEl.textContent = `${origin}${data.screen_bin_path}`;
     }
 
     await updateCalendarStatusDisplay();

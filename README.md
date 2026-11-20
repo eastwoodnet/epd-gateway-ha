@@ -81,10 +81,12 @@ ESP32-C3 作为墨水屏的无线中继，负责通过 WiFi 从 Home Assistant �
    ```
 3. 在 Web 配置界面中完成两项设定：
    - **WiFi 设置**：填入家庭 2.4G WiFi 的 SSID 与密码。
-   - **网关配置**：将「图片拉取 URL」设置为集成页面显示的专属安全拉取地址（含随机密钥）：
-     ```text
-     http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin
-     ```
+   - **网关配置**（进入「服务与屏幕」标签页）：
+     - **服务器 URL**：填入集成页面为您生成的完整安全拉取地址（注意**不要**带前面的 `GET `）：
+       ```text
+       http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin
+       ```
+     - **用户 Token / 密钥**：**留空即可**（随机安全密钥已内嵌在上方 URL 路径中，无需填写 Header Token）。
 4. 点击「保存并连接」，ESP32 将自动重启并连接到您的家庭局域网。
 
 ---
@@ -118,13 +120,15 @@ reboot                                                   # 重启网关
 ---
 
 ### 步骤 2：配置 ESP32 硬件网关拉取地址
-添加集成后，打开侧边栏「EPD 墨水屏」工作台的 **「系统设置与网关」** 标签页，复制页面底部为您生成的专属安全拉取 URL，填入 ESP32 网关 Web 管理后台：
+添加集成后，打开侧边栏「EPD 墨水屏」工作台的 **「系统设置与网关」** 标签页，在页面底部找到为您生成的专属安全拉取地址，将其填入 ESP32 网关 Web 后台的 **「服务与屏幕 → 服务器 URL」** 中：
 ```text
 http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin
 ```
+- **用户 Token / 密钥**：**保持留空即可**（不要把上述地址或密钥填进 `用户 Token / 密钥` 框，该框仅用于标准 `Authorization` 请求头）。
+- **提示**：请勿复制多余的 `GET ` 字样，直接填写 `http://...` 开头的完整 URL。
 
 > [!NOTE]
-> 该接口由每个集成条目独立生成的随机高强度密钥保护（使用 `hmac.compare_digest` 校验），专为 ESP32 客户端设计并支持标准 HTTP ETag。当排程未变或处于免打扰时直接响应 `304 Not Modified`，最大化延长墨水屏与网关寿命。
+> 该接口由每个集成条目在首次添加时自动生成的 256-bit 随机密钥保护（使用 `hmac.compare_digest` 校验），**密钥会永久保存在 HA 配置条目中，重启 HA 或升级版本均不会变动**（除非删除集成重新添加）。同时支持标准 HTTP ETag，排程未变或处于免打扰时直接响应 `304 Not Modified`，最大化延长墨水屏与网关寿命。
 
 ---
 
