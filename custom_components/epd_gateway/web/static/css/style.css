@@ -1,4 +1,4 @@
-:root {
+:host, :root {
   color-scheme: light;
   /* Light Theme (Crisp High-Contrast Slate) */
   --bg-primary: #e2e8f0;
@@ -49,7 +49,7 @@
   --radius-md: 8px;
 }
 
-:root[data-theme="dark"] {
+:host([data-theme="dark"]), :root[data-theme="dark"] {
   color-scheme: dark;
   /* Dark Theme (Modern Slate Dark) */
   --bg-primary: #0b1120;
@@ -102,7 +102,7 @@
   padding: 0;
 }
 
-body {
+body, .epd-body {
   font-family: var(--font-sans);
   background-color: var(--bg-primary);
   color: var(--text-main);

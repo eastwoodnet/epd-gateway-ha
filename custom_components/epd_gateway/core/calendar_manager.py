@@ -15,18 +15,32 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_TTL_SEC = 900  # 15 分钟缓存
 
 
-def get_local_tz():
-    return tz.gettz("Asia/Shanghai") or tz.tzlocal()
+def get_local_tz(tz_info=None):
+    return tz_info or tz.tzlocal()
 
 
 class CalendarManager:
-    def __init__(self, data_dir: str, default_ical_url: str = "", cache_ttl_sec: int = DEFAULT_CACHE_TTL_SEC):
+    def __init__(
+        self,
+        data_dir: str,
+        default_ical_url: str = "",
+        cache_ttl_sec: int = DEFAULT_CACHE_TTL_SEC,
+        tz_provider=None,
+    ):
         self.data_dir = data_dir
         self.ical_url = default_ical_url.strip()
         self.cache_ttl_sec = cache_ttl_sec
+        self._tz_provider = tz_provider
         self.cache_file = os.path.join(data_dir, "calendar.json")
         self._memory_cache: Optional[Dict[str, Any]] = None
         self._load_cache()
+
+    def _get_tz(self):
+        if self._tz_provider is not None:
+            tz_info = self._tz_provider()
+            if tz_info is not None:
+                return tz_info
+        return get_local_tz()
 
     def set_ical_url(self, url: str) -> None:
         clean = url.strip()
@@ -107,7 +121,7 @@ class CalendarManager:
         ]
 
     def _parse_ical_content(self, ical_text: str, target_date: date) -> List[Dict[str, Any]]:
-        local_tz = get_local_tz()
+        local_tz = self._get_tz()
         today_start = datetime.combine(target_date, dtime.min).replace(tzinfo=local_tz)
         today_end = datetime.combine(target_date, dtime.max).replace(tzinfo=local_tz)
         now_dt = datetime.now(local_tz)
@@ -217,15 +231,18 @@ class CalendarManager:
     def fetch_calendar_data(self, force_refresh: bool = False, custom_url: Optional[str] = None) -> Dict[str, Any]:
         url = custom_url if custom_url is not None else self.ical_url
         url = self.normalize_url(url)
-        now_ts = time.time()
-        now_date_str = date.today().isoformat()
+        local_tz = self._get_tz()
+        now_dt = datetime.now(local_tz)
+        now_ts = now_dt.timestamp()
+        today_dt = now_dt.date()
+        now_date_str = today_dt.isoformat()
 
         if not force_refresh and self._memory_cache:
             cache_ts = self._memory_cache.get("fetched_at", 0)
             cache_date = self._memory_cache.get("today_date", "")
             if (now_ts - cache_ts < self.cache_ttl_sec) and (cache_date == now_date_str):
                 events = self._memory_cache.get("events", [])
-                cur_hm = datetime.now().strftime("%H:%M")
+                cur_hm = now_dt.strftime("%H:%M")
                 for ev in events:
                     if not ev.get("is_all_day"):
                         st = ev.get("start_time", "99:99")
@@ -234,7 +251,7 @@ class CalendarManager:
                 return self._memory_cache
 
         if not url:
-            mock_events = self.get_mock_events(date.today())
+            mock_events = self.get_mock_events(today_dt)
             res = {
                 "fetched_at": now_ts,
                 "today_date": now_date_str,
@@ -243,7 +260,7 @@ class CalendarManager:
                 "status": "ok",
                 "message": "未配置 iCal URL，当前展示模拟日程数据",
                 "events": mock_events,
-                "update_time": datetime.now().strftime("%H:%M"),
+                "update_time": now_dt.strftime("%H:%M"),
             }
             self._save_cache(res)
             return res
@@ -257,7 +274,7 @@ class CalendarManager:
             resp.raise_for_status()
             content = resp.text
 
-            parsed_events = self._parse_ical_content(content, date.today())
+            parsed_events = self._parse_ical_content(content, today_dt)
             res = {
                 "fetched_at": now_ts,
                 "today_date": now_date_str,
@@ -266,7 +283,7 @@ class CalendarManager:
                 "status": "ok",
                 "message": f"成功拉取并解析 {len(parsed_events)} 项今日日程",
                 "events": parsed_events,
-                "update_time": datetime.now().strftime("%H:%M"),
+                "update_time": now_dt.strftime("%H:%M"),
             }
             self._save_cache(res)
             return res
@@ -290,7 +307,7 @@ class CalendarManager:
                     "message": f"同步失败: {err_msg} (当前展示离线缓存)",
                     "error_detail": err_msg,
                     "events": cached_events,
-                    "update_time": self._memory_cache.get("update_time", datetime.now().strftime("%H:%M")),
+                    "update_time": self._memory_cache.get("update_time", now_dt.strftime("%H:%M")),
                 }
 
             return {
@@ -303,5 +320,5 @@ class CalendarManager:
                 "message": f"网络拉取失败: {err_msg}",
                 "error_detail": err_msg,
                 "events": [],
-                "update_time": datetime.now().strftime("%H:%M"),
+                "update_time": now_dt.strftime("%H:%M"),
             }

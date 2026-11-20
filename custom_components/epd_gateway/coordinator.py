@@ -11,6 +11,11 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    from homeassistant.util import dt as dt_util
+except ImportError:
+    dt_util = None  # type: ignore[assignment]
+
 from .const import (
     API_BASE_PATH,
     CONF_CALENDAR_ENTITY,
@@ -18,6 +23,7 @@ from .const import (
     CONF_GATEWAY_URL,
     CONF_INDOOR_HUMIDITY_ENTITY,
     CONF_INDOOR_TEMP_ENTITY,
+    CONF_SCREEN_TOKEN,
     CONF_WEATHER_CITY,
     CONF_WEATHER_ENTITY,
     DEFAULT_GATEWAY_URL,
@@ -82,24 +88,12 @@ class EpdGatewayCoordinator:
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(os.path.join(self.data_dir, "photos"), exist_ok=True)
 
-        # Synchronize process timezone with Home Assistant's configured time_zone (e.g. Asia/Shanghai)
-        # so that 24H schedules, weather dates, and iCal today-filtering match local wall-clock time
-        # even when running in Docker/K3s containers where /etc/localtime is missing or UTC.
-        ha_tz = getattr(getattr(hass, "config", None), "time_zone", None)
-        tz_name = str(ha_tz).strip() if ha_tz else (os.environ.get("TZ") or "Asia/Shanghai")
-        if tz_name:
-            os.environ["TZ"] = tz_name
-            if hasattr(time, "tzset"):
-                try:
-                    time.tzset()
-                except Exception:
-                    pass
-
         # Ensure fonts are available in data_dir/fonts
         self.fonts_dir = os.path.join(self.data_dir, "fonts")
         ensure_fonts_available(self.fonts_dir)
 
         cfg = config_data or {}
+        self.screen_token: str = str(cfg.get(CONF_SCREEN_TOKEN) or "")
         initial_gateway_url = cfg.get(CONF_GATEWAY_URL) or DEFAULT_GATEWAY_URL
 
         settings_existed = os.path.exists(os.path.join(self.data_dir, "settings.json"))
@@ -149,6 +143,7 @@ class EpdGatewayCoordinator:
         self.calendar_mgr = CalendarManager(
             self.data_dir,
             default_ical_url=self.settings_mgr.settings.calendar_ical_url,
+            tz_provider=self.get_ha_timezone,
         )
         self.notifier = GatewayNotifier(self.settings_mgr.settings.gateway_url)
 
@@ -159,6 +154,26 @@ class EpdGatewayCoordinator:
         self.last_rendered_png: Optional[bytes] = None
         self.last_updated_dt: Optional[datetime] = None
         self.last_effective_mode: str = "photo_album"
+
+    def get_ha_timezone(self):
+        """Return Home Assistant's configured tzinfo without mutating process TZ."""
+        if dt_util is not None:
+            ha_tz = getattr(getattr(self.hass, "config", None), "time_zone", None)
+            if ha_tz:
+                tz_info = dt_util.get_time_zone(str(ha_tz))
+                if tz_info is not None:
+                    return tz_info
+            return dt_util.DEFAULT_TIME_ZONE
+        return datetime.now().astimezone().tzinfo
+
+    def get_local_now(self) -> datetime:
+        """Return timezone-aware current datetime in HA's configured timezone."""
+        return datetime.now(self.get_ha_timezone())
+
+    def get_tz_offset_hours(self) -> int:
+        """Compute integer UTC hour offset from HA's configured timezone."""
+        offset = self.get_local_now().utcoffset()
+        return int(round(offset.total_seconds() / 3600)) if offset else 0
 
     async def _run_in_executor(self, func: Callable[..., Any], *args: Any) -> Any:
         if self.hass is not None and hasattr(self.hass, "async_add_executor_job"):
@@ -184,21 +199,26 @@ class EpdGatewayCoordinator:
 
     def notify_gateway_for_current_state(self) -> None:
         """Notify ESP32 gateway according to current effective mode (identical to server/main.py)."""
-        now_ts = time.time()
+        now_dt = self.get_local_now()
+        now_ts = now_dt.timestamp()
         if self.memo_mgr.is_active(now_ts):
             self.notifier.trigger_sync_background()
             return
 
         _, active_mode, _ = self.scheduler.get_current_rule(
-            fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min
+            now=now_dt,
+            fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min,
         )
         if active_mode == "sleep_dnd":
             self._last_dispatched_mode = "sleep_dnd"
             return
         if active_mode == "clock":
             self._last_dispatched_mode = "clock"
-            self._last_calendar_sync_date = time.strftime("%Y-%m-%d", time.localtime(now_ts))
-            self.notifier.trigger_calendar_mode_background(timestamp=int(now_ts), timezone=8)
+            self._last_calendar_sync_date = now_dt.strftime("%Y-%m-%d")
+            self.notifier.trigger_calendar_mode_background(
+                timestamp=int(now_ts),
+                timezone=self.get_tz_offset_hours(),
+            )
             return
 
         self.notifier.trigger_sync_background()
@@ -239,15 +259,17 @@ class EpdGatewayCoordinator:
         self.notifier.set_gateway_url(updated.gateway_url)
         self.weather_mgr.default_city = updated.weather_city
         self.calendar_mgr.set_ical_url(updated.calendar_ical_url)
-
-        self.notify_listeners()
+        if merged_config.get(CONF_SCREEN_TOKEN):
+            self.screen_token = str(merged_config[CONF_SCREEN_TOKEN])
 
     def get_effective_mode_info(self) -> Dict[str, Any]:
         """Return current effective mode, next_pull_sec, and active memo status."""
-        now_ts = time.time()
+        now_dt = self.get_local_now()
+        now_ts = now_dt.timestamp()
         active_memo = self.memo_mgr.get_active_memo()
         active_rule, sched_mode, next_pull_sec = self.scheduler.get_current_rule(
-            fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min
+            now=now_dt,
+            fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min,
         )
         effective_mode = "memo" if active_memo else sched_mode
         if active_memo:
@@ -433,7 +455,8 @@ class EpdGatewayCoordinator:
                 today_min = min_s
 
             dt_str = str(fc.get("datetime", ""))
-            target_dt = date.today() + timedelta(days=idx)
+            local_now = self.get_local_now()
+            target_dt = local_now.date() + timedelta(days=idx)
             label = weekdays_cn[target_dt.weekday()]
             short_date = target_dt.isoformat()
             if dt_str:
@@ -462,7 +485,7 @@ class EpdGatewayCoordinator:
             "temp_min": today_min,
             "temp_max": today_max,
             "forecast": forecast_list,
-            "update_time": datetime.now().strftime("%H:%M"),
+            "update_time": self.get_local_now().strftime("%H:%M"),
             "stale": False,
             "source": entity_id,
         }
@@ -508,9 +531,9 @@ class EpdGatewayCoordinator:
         if state is None or state.state in ("unavailable", "unknown", None):
             return None
 
-        local_tz = get_local_tz()
-        today = date.today()
+        local_tz = self.get_ha_timezone()
         now_dt = datetime.now(local_tz)
+        today = now_dt.date()
         start_dt = datetime.combine(today, dtime.min).replace(tzinfo=local_tz)
         end_dt = datetime.combine(today, dtime.max).replace(tzinfo=local_tz)
 
@@ -623,7 +646,8 @@ class EpdGatewayCoordinator:
         """
         next_pull_sec = 1800
         bin_data: Optional[bytes] = None
-        now_ts = time.time()
+        now_dt = self.get_local_now()
+        now_ts = now_dt.timestamp()
         effective_mode = "photo_album"
 
         # 1. First priority: Instant Memo override
@@ -634,11 +658,14 @@ class EpdGatewayCoordinator:
             memo_state = self.memo_mgr.get_state()
             remain_sec = max(30, int(memo_state.expire_at - now_ts))
             next_pull_sec = min(remain_sec, 3600)
+        else:
+            await self._run_in_executor(self.memo_mgr.persist_if_dirty)
 
         # 2. Second priority: 24-hour schedule
         if bin_data is None:
             active_rule, active_mode, sched_next_pull = self.scheduler.get_current_rule(
-                fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min
+                now=now_dt,
+                fallback_rotate_min=self.settings_mgr.settings.rotate_interval_min,
             )
             effective_mode = active_mode
             next_pull_sec = sched_next_pull
@@ -660,13 +687,15 @@ class EpdGatewayCoordinator:
                 )
 
             if active_mode == "clock":
-                today_str = time.strftime("%Y-%m-%d", time.localtime(now_ts))
+                today_str = now_dt.strftime("%Y-%m-%d")
                 cal_etag = f'"native-calendar-{today_str}"'
                 if self._last_dispatched_mode != "clock" or self._last_calendar_sync_date != today_str:
                     self._last_dispatched_mode = "clock"
                     self._last_calendar_sync_date = today_str
                     self.notifier.trigger_calendar_mode_background(
-                        timestamp=int(now_ts), timezone=8, delay_sec=1.2
+                        timestamp=int(now_ts),
+                        timezone=self.get_tz_offset_hours(),
+                        delay_sec=1.2,
                     )
                 self.last_effective_mode = "clock"
                 return ScreenRenderResult(
@@ -747,7 +776,7 @@ class EpdGatewayCoordinator:
         if self.last_rendered_bin != bin_data:
             self.last_rendered_bin = bin_data
             self.last_rendered_png = await self._run_in_executor(epd_bytes_to_preview_png, bin_data)
-            self.last_updated_dt = datetime.now()
+            self.last_updated_dt = self.get_local_now()
             self.last_effective_mode = effective_mode
             self.notify_listeners()
         else:
@@ -784,5 +813,5 @@ class EpdGatewayCoordinator:
         bin_data = await self._run_in_executor(render_weather_image, w_data)
         self.last_rendered_bin = bin_data
         self.last_rendered_png = await self._run_in_executor(epd_bytes_to_preview_png, bin_data)
-        self.last_updated_dt = datetime.now()
+        self.last_updated_dt = self.get_local_now()
         return self.last_rendered_png

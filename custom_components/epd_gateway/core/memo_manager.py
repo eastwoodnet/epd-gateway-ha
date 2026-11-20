@@ -13,6 +13,7 @@ class MemoManager:
         os.makedirs(data_dir, exist_ok=True)
         self.memo_file = os.path.join(data_dir, "memo.json")
         self._cached_bin: Optional[bytes] = None
+        self._needs_persist_clear: bool = False
         self._state = self._load()
 
     def _load(self) -> MemoState:
@@ -54,6 +55,7 @@ class MemoManager:
         self._write_state(state)
         self._state = state
         self._cached_bin = rendered
+        self._needs_persist_clear = False
         return state
 
     def push_memo(
@@ -74,6 +76,14 @@ class MemoManager:
         self._write_state(state)
         self._state = state
         self._cached_bin = None
+        self._needs_persist_clear = False
+
+    def persist_if_dirty(self) -> None:
+        """Persist expired memo clearance to disk (call from executor)."""
+        if self._needs_persist_clear:
+            self._needs_persist_clear = False
+            if not self._state.active:
+                self._write_state(MemoState())
 
     def is_active(self, now: Optional[float] = None) -> bool:
         if not self._state.active:
@@ -81,12 +91,9 @@ class MemoManager:
         current_time = time.time() if now is None else now
         if current_time < self._state.expire_at:
             return True
-        try:
-            self.clear_memo()
-        except Exception as exc:
-            self._state = MemoState()
-            self._cached_bin = None
-            print(f"[MemoManager] 持久化过期便签状态失败: {exc}")
+        self._state = MemoState()
+        self._cached_bin = None
+        self._needs_persist_clear = True
         return False
 
     def get_state(self) -> MemoState:

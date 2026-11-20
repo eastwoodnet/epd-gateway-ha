@@ -16,6 +16,8 @@ class AlbumManager:
         self.photos_dir = os.path.join(data_dir, "photos")
         self.api_prefix = api_prefix.rstrip("/")
         os.makedirs(self.photos_dir, exist_ok=True)
+        self._slots_cache: Dict[int, Dict[str, Any]] = {}
+        self.refresh_slots_cache()
 
     def _get_bin_path(self, slot_id: int) -> str:
         return os.path.join(self.photos_dir, f"slot_{slot_id}.bin")
@@ -23,7 +25,7 @@ class AlbumManager:
     def _get_png_path(self, slot_id: int) -> str:
         return os.path.join(self.photos_dir, f"slot_{slot_id}.png")
 
-    def get_slot_info(self, slot_id: int) -> Dict[str, Any]:
+    def _stat_slot_info(self, slot_id: int) -> Dict[str, Any]:
         bin_path = self._get_bin_path(slot_id)
         updated_at = ""
         size = 0
@@ -43,6 +45,22 @@ class AlbumManager:
             "preview_url": f"{self.api_prefix}/album/preview/{slot_id}.png" if exists else None,
         }
 
+    def refresh_slots_cache(self) -> None:
+        """Refresh in-memory slot metadata cache from disk (run in executor)."""
+        for i in range(1, TOTAL_SLOTS + 1):
+            self._slots_cache[i] = self._stat_slot_info(i)
+
+    def get_slot_info(self, slot_id: int) -> Dict[str, Any]:
+        if slot_id in self._slots_cache:
+            return dict(self._slots_cache[slot_id])
+        return {
+            "id": slot_id,
+            "exists": False,
+            "size": 0,
+            "updated_at": "",
+            "preview_url": None,
+        }
+
     def list_slots(self) -> List[Dict[str, Any]]:
         return [self.get_slot_info(i) for i in range(1, TOTAL_SLOTS + 1)]
 
@@ -56,7 +74,9 @@ class AlbumManager:
         raw_to_image(bin_data, 400, 300).save(preview, "PNG")
         atomic_write_bytes(self._get_png_path(slot_id), preview.getvalue())
         atomic_write_bytes(self._get_bin_path(slot_id), bin_data)
-        return self.get_slot_info(slot_id)
+        info = self._stat_slot_info(slot_id)
+        self._slots_cache[slot_id] = info
+        return dict(info)
 
     def delete_slot(self, slot_id: int) -> bool:
         if slot_id < 1 or slot_id > TOTAL_SLOTS:
@@ -71,6 +91,7 @@ class AlbumManager:
             os.unlink(self._get_png_path(slot_id))
         except FileNotFoundError:
             pass
+        self._slots_cache[slot_id] = self._stat_slot_info(slot_id)
         return existed
 
     def get_slot_png(self, slot_id: int) -> Optional[bytes]:
@@ -91,11 +112,10 @@ class AlbumManager:
         return None
 
     def get_existing_slots(self) -> List[int]:
-        existing = []
-        for i in range(1, TOTAL_SLOTS + 1):
-            if os.path.exists(self._get_bin_path(i)):
-                existing.append(i)
-        return existing
+        return [
+            i for i in range(1, TOTAL_SLOTS + 1)
+            if self._slots_cache.get(i, {}).get("exists")
+        ]
 
     def get_active_photo_info(
         self,

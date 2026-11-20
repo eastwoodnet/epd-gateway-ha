@@ -12,8 +12,26 @@ let activeImageReader = null;
 let albumSlotsRequestVersion = 0;
 let memoStatusRequestVersion = 0;
 
-// 初始化
-document.addEventListener("DOMContentLoaded", () => {
+let _root = typeof document !== "undefined" ? document : null;
+let _host = null;
+let _hassProvider = null;
+let _pollTimer = null;
+
+function byId(id) {
+  return _root ? _root.getElementById(id) : null;
+}
+
+function qsa(selector) {
+  return _root ? _root.querySelectorAll(selector) : [];
+}
+
+export function initEpdWorkbench(root, hassProvider, hostEl = null) {
+  if (root) {
+    _root = root;
+  }
+  _host = hostEl;
+  _hassProvider = hassProvider || null;
+
   initTheme();
   initTabs();
   initPhotoStudio();
@@ -25,13 +43,33 @@ document.addEventListener("DOMContentLoaded", () => {
   initScheduleForm();
   initSettingsForm();
 
+  const dismissBtn = byId("dismissCalendarAlertBtn");
+  if (dismissBtn) {
+    dismissBtn.addEventListener("click", () => {
+      const alertEl = byId("calendarGlobalAlert");
+      if (alertEl) alertEl.style.display = "none";
+    });
+  }
+
+  if (_pollTimer) {
+    clearInterval(_pollTimer);
+  }
   // 定时刷新便签和状态 (每 10 秒)
-  setInterval(() => {
+  _pollTimer = setInterval(() => {
     loadMemoStatus();
     loadScheduleOverview();
     updateCalendarStatusDisplay();
   }, 10000);
-});
+}
+
+// 兼容独立页面加载
+if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", () => {
+    if (document.getElementById("themeSwitcher")) {
+      initEpdWorkbench(document, null, document.documentElement);
+    }
+  });
+}
 
 // ----------------- 主题切换 (Auto / Light / Dark) -----------------
 function resolveEffectiveTheme(pref) {
@@ -46,19 +84,18 @@ function resolveEffectiveTheme(pref) {
 function applyThemePreference(pref) {
   const validPref = ["auto", "light", "dark"].includes(pref) ? pref : "auto";
   const effective = resolveEffectiveTheme(validPref);
-  if (typeof document !== "undefined" && document.documentElement && typeof document.documentElement.setAttribute === "function") {
-    document.documentElement.setAttribute("data-theme", effective);
+  const themeTarget = _host || (typeof document !== "undefined" ? document.documentElement : null);
+  if (themeTarget && typeof themeTarget.setAttribute === "function") {
+    themeTarget.setAttribute("data-theme", effective);
   }
-  if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
-    document.querySelectorAll(".theme-btn").forEach(btn => {
-      const btnPref = typeof btn.getAttribute === "function" ? btn.getAttribute("data-theme-pref") : null;
-      if (btnPref === validPref) {
-        btn.classList.add("active");
-      } else if (btn.classList && typeof btn.classList.remove === "function") {
-        btn.classList.remove("active");
-      }
-    });
-  }
+  qsa(".theme-btn").forEach(btn => {
+    const btnPref = typeof btn.getAttribute === "function" ? btn.getAttribute("data-theme-pref") : null;
+    if (btnPref === validPref) {
+      btn.classList.add("active");
+    } else if (btn.classList && typeof btn.classList.remove === "function") {
+      btn.classList.remove("active");
+    }
+  });
 }
 
 function initTheme() {
@@ -69,7 +106,7 @@ function initTheme() {
   applyThemePreference(currentPref);
 
   if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
-    document.querySelectorAll(".theme-btn").forEach(btn => {
+    qsa(".theme-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const pref = btn.getAttribute("data-theme-pref") || "auto";
         currentPref = pref;
@@ -121,8 +158,34 @@ function resolveApiUrl(url) {
   return url;
 }
 
+async function authFetch(url, options = {}) {
+  const resolved = resolveApiUrl(url);
+  const hass = typeof _hassProvider === "function" ? _hassProvider() : _hassProvider;
+  if (hass && typeof hass.fetchWithAuth === "function") {
+    return hass.fetchWithAuth(resolved, options);
+  }
+  return fetch(resolved, options);
+}
+
+async function loadAuthImage(imgEl, url) {
+  if (!imgEl) return;
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    if (imgEl.dataset.objectUrl) {
+      URL.revokeObjectURL(imgEl.dataset.objectUrl);
+    }
+    imgEl.dataset.objectUrl = objectUrl;
+    imgEl.src = objectUrl;
+  } catch (err) {
+    console.error("加载预览图失败:", err);
+  }
+}
+
 async function requestJson(url, options = {}) {
-  const res = await fetch(resolveApiUrl(url), options);
+  const res = await authFetch(url, options);
   let data;
   try {
     data = await res.json();
@@ -137,22 +200,22 @@ async function requestJson(url, options = {}) {
 
 // ----------------- 标签页切换 -----------------
 function initTabs() {
-  const tabs = document.querySelectorAll(".tab-btn");
+  const tabs = qsa(".tab-btn");
   tabs.forEach(btn => {
     btn.addEventListener("click", () => {
       tabs.forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      qsa(".tab-content").forEach(c => c.classList.remove("active"));
       btn.classList.add("active");
       const targetId = btn.getAttribute("data-tab");
-      document.getElementById(targetId).classList.add("active");
+      byId(targetId).classList.add("active");
     });
   });
 }
 
 // ----------------- 相册与图像调优 (Photo Studio) -----------------
 function initPhotoStudio() {
-  const fileInput = document.getElementById("imageFileInput");
-  const canvas = document.getElementById("previewCanvas");
+  const fileInput = byId("imageFileInput");
+  const canvas = byId("previewCanvas");
   canvas.width = WIDTH;
   canvas.height = HEIGHT;
   const ctx = canvas.getContext("2d");
@@ -169,7 +232,7 @@ function initPhotoStudio() {
     const selectionVersion = ++imageSelectionVersion;
     originalImage = null;
     currentProcessedBinary = null;
-    document.getElementById("saveSlotButtons").style.display = "none";
+    byId("saveSlotButtons").style.display = "none";
 
     if (activeImageReader) {
       activeImageReader.abort();
@@ -200,28 +263,35 @@ function initPhotoStudio() {
       if (selectionVersion !== imageSelectionVersion || err.name === "AbortError") return;
       originalImage = null;
       currentProcessedBinary = null;
-      document.getElementById("saveSlotButtons").style.display = "none";
+      byId("saveSlotButtons").style.display = "none";
       fileInput.value = "";
       alert(`图片加载失败: ${err.message}`);
     }
   });
 
   // 滑块与下拉框事件
-  const contrastInput = document.getElementById("contrastRange");
-  const strengthInput = document.getElementById("strengthRange");
-  const algSelect = document.getElementById("algSelect");
+  const contrastInput = byId("contrastRange");
+  const strengthInput = byId("strengthRange");
+  const algSelect = byId("algSelect");
 
   contrastInput.addEventListener("input", (e) => {
-    document.getElementById("contrastVal").textContent = e.target.value;
+    byId("contrastVal").textContent = e.target.value;
     renderCanvas();
   });
 
   strengthInput.addEventListener("input", (e) => {
-    document.getElementById("strengthVal").textContent = e.target.value;
+    byId("strengthVal").textContent = e.target.value;
     renderCanvas();
   });
 
   algSelect.addEventListener("change", renderCanvas);
+
+  qsa(".save-slot-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const slotId = parseInt(btn.getAttribute("data-slot"), 10);
+      if (slotId) saveCurrentToSlot(slotId);
+    });
+  });
 }
 
 async function validateImageFile(file) {
@@ -281,7 +351,7 @@ function decodeImage(dataUrl) {
 function renderCanvas() {
   if (!originalImage) return;
 
-  const canvas = document.getElementById("previewCanvas");
+  const canvas = byId("previewCanvas");
   const ctx = canvas.getContext("2d");
 
   // 1. 等比居中缩放裁剪至 400x300
@@ -308,12 +378,12 @@ function renderCanvas() {
 
   // 2. 获取 ImageData 并应用对比度调节
   let imgData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-  const contrast = parseFloat(document.getElementById("contrastRange").value) || 1.0;
+  const contrast = parseFloat(byId("contrastRange").value) || 1.0;
   imgData = adjustContrast(imgData, contrast);
 
   // 3. 执行抖动算法 (Floyd-Steinberg / Atkinson)
-  const alg = document.getElementById("algSelect").value;
-  const strength = parseFloat(document.getElementById("strengthRange").value) || 1.0;
+  const alg = byId("algSelect").value;
+  const strength = parseFloat(byId("strengthRange").value) || 1.0;
 
   if (alg === "floydSteinberg") {
     imgData = floydSteinbergDither(imgData, strength);
@@ -328,7 +398,7 @@ function renderCanvas() {
 
   // 5. 生成 30,000 字节二进制数据准备保存
   currentProcessedBinary = processImageDataToBinary(imgData);
-  document.getElementById("saveSlotButtons").style.display = "flex";
+  byId("saveSlotButtons").style.display = "flex";
 }
 
 async function saveCurrentToSlot(slotId) {
@@ -398,7 +468,7 @@ function renderAlbumSlots(slots) {
       previewUrl.searchParams.set("t", cacheBuster);
 
       const image = document.createElement("img");
-      image.src = previewUrl.href;
+      loadAuthImage(image, previewUrl.pathname + previewUrl.search);
       image.className = "slot-thumb";
       image.alt = `Slot ${slotId}`;
 
@@ -440,7 +510,7 @@ function renderAlbumSlots(slots) {
     fragment.appendChild(card);
   });
 
-  document.getElementById("slotsContainer").replaceChildren(fragment);
+  byId("slotsContainer").replaceChildren(fragment);
 }
 
 async function loadAlbumSlots() {
@@ -455,7 +525,7 @@ async function loadAlbumSlots() {
     const error = document.createElement("div");
     error.style.gridColumn = "1 / -1";
     error.textContent = `卡槽加载失败: ${err.message}`;
-    document.getElementById("slotsContainer").replaceChildren(error);
+    byId("slotsContainer").replaceChildren(error);
   }
 }
 
@@ -486,24 +556,24 @@ function validateScheduleResponse(data) {
 function renderScheduleOverview(data) {
   const modeName = getModeLabel(data.active_mode);
   const nextPullSec = Number(data.next_pull_sec);
-  document.getElementById("activeModeBadge").textContent = `当前生效: ${modeName}`;
-  document.getElementById("nextPullBadge").textContent = Number.isFinite(nextPullSec)
+  byId("activeModeBadge").textContent = `当前生效: ${modeName}`;
+  byId("nextPullBadge").textContent = Number.isFinite(nextPullSec)
     ? `下次刷新约 ${Math.round(nextPullSec / 60)} 分钟后`
     : "下次刷新: --";
 }
 
 function updateScheduleControls() {
   const disabled = scheduleBusy || !currentScheduleConfig;
-  const addBtn = document.getElementById("addRuleBtn");
+  const addBtn = byId("addRuleBtn");
   if (addBtn) addBtn.disabled = disabled;
-  const fallbackSelect = document.getElementById("fallbackModeSelect");
+  const fallbackSelect = byId("fallbackModeSelect");
   if (fallbackSelect) fallbackSelect.disabled = disabled;
-  const sortBtn = document.getElementById("sortRulesBtn");
+  const sortBtn = byId("sortRulesBtn");
   if (sortBtn) {
     sortBtn.disabled = disabled || !currentScheduleConfig || currentScheduleConfig.rules.length <= 1;
   }
   if (typeof document.querySelectorAll === "function") {
-    document.querySelectorAll("#ruleListContainer button").forEach(button => {
+    qsa("#ruleListContainer button").forEach(button => {
       button.disabled = disabled || (button.dataset && button.dataset.edgeDisabled === "true");
     });
   }
@@ -522,7 +592,7 @@ async function loadSchedule() {
     currentScheduleConfig = data.config;
     renderTimelineBar(data.config.rules);
     renderRuleList(data.config.rules);
-    document.getElementById("fallbackModeSelect").value = data.config.fallback_mode || "photo_album";
+    byId("fallbackModeSelect").value = data.config.fallback_mode || "photo_album";
     updateNewRuleHint();
     if (statusRequestVersion === scheduleStatusRequestVersion) {
       renderScheduleOverview(data);
@@ -532,15 +602,15 @@ async function loadSchedule() {
     if (requestVersion !== scheduleConfigRequestVersion) return false;
     console.error("加载排程配置失败:", err);
     if (statusRequestVersion === scheduleStatusRequestVersion) {
-      document.getElementById("activeModeBadge").textContent = "排程加载失败";
-      document.getElementById("nextPullBadge").textContent = "请检查服务状态";
+      byId("activeModeBadge").textContent = "排程加载失败";
+      byId("nextPullBadge").textContent = "请检查服务状态";
     }
     if (!currentScheduleConfig) {
       const error = document.createElement("div");
       error.style.padding = "20px";
       error.style.color = "var(--text-muted)";
       error.textContent = `排程加载失败: ${err.message}`;
-      document.getElementById("ruleListContainer").replaceChildren(error);
+      byId("ruleListContainer").replaceChildren(error);
     }
     return false;
   } finally {
@@ -560,8 +630,8 @@ async function loadScheduleOverview() {
   } catch (err) {
     if (statusRequestVersion !== scheduleStatusRequestVersion) return;
     console.error("刷新排程状态失败:", err);
-    document.getElementById("activeModeBadge").textContent = "排程状态刷新失败";
-    document.getElementById("nextPullBadge").textContent = "请检查服务状态";
+    byId("activeModeBadge").textContent = "排程状态刷新失败";
+    byId("nextPullBadge").textContent = "请检查服务状态";
   }
 }
 
@@ -737,7 +807,7 @@ function analyzeRuleConflicts(rules) {
 }
 
 function renderTimelineBar(rules) {
-  const bar = document.getElementById("timelineBar");
+  const bar = byId("timelineBar");
   const fragment = document.createDocumentFragment();
 
   // 离散为 24 小时 (1440分钟)
@@ -817,7 +887,7 @@ function renderRuleList(rules) {
     empty.style.color = "var(--text-muted)";
     empty.style.padding = "20px";
     empty.textContent = "暂无排程规则，将全天执行兜底模式";
-    document.getElementById("ruleListContainer").replaceChildren(empty);
+    byId("ruleListContainer").replaceChildren(empty);
     return;
   }
 
@@ -927,7 +997,7 @@ function renderRuleList(rules) {
     fragment.appendChild(item);
   });
 
-  document.getElementById("ruleListContainer").replaceChildren(fragment);
+  byId("ruleListContainer").replaceChildren(fragment);
 }
 
 function cloneScheduleConfig() {
@@ -953,11 +1023,11 @@ async function sortRulesByTime() {
 }
 
 function updateNewRuleHint() {
-  const hintEl = document.getElementById("newRuleConflictHint");
+  const hintEl = byId("newRuleConflictHint");
   if (!hintEl || !currentScheduleConfig) return;
 
-  const start = document.getElementById("newRuleStart").value;
-  const end = document.getElementById("newRuleEnd").value;
+  const start = byId("newRuleStart").value;
+  const end = byId("newRuleEnd").value;
   const startMin = parseTimeToMinutes(start);
   const endMin = parseTimeToMinutes(end);
   if (startMin === null || endMin === null) {
@@ -1003,21 +1073,21 @@ function updateNewRuleHint() {
 }
 
 function initScheduleForm() {
-  const sortBtn = document.getElementById("sortRulesBtn");
+  const sortBtn = byId("sortRulesBtn");
   if (sortBtn) {
     sortBtn.addEventListener("click", sortRulesByTime);
   }
 
-  document.getElementById("newRuleStart").addEventListener("input", updateNewRuleHint);
-  document.getElementById("newRuleEnd").addEventListener("input", updateNewRuleHint);
+  byId("newRuleStart").addEventListener("input", updateNewRuleHint);
+  byId("newRuleEnd").addEventListener("input", updateNewRuleHint);
 
-  document.getElementById("addRuleBtn").addEventListener("click", async () => {
+  byId("addRuleBtn").addEventListener("click", async () => {
     if (scheduleBusy || !currentScheduleConfig) return;
 
-    const name = document.getElementById("newRuleName").value.trim() || "自定义时段";
-    const start = document.getElementById("newRuleStart").value;
-    const end = document.getElementById("newRuleEnd").value;
-    const mode = document.getElementById("newRuleMode").value;
+    const name = byId("newRuleName").value.trim() || "自定义时段";
+    const start = byId("newRuleStart").value;
+    const end = byId("newRuleEnd").value;
+    const mode = byId("newRuleMode").value;
 
     const startMin = parseTimeToMinutes(start);
     const endMin = parseTimeToMinutes(end);
@@ -1032,7 +1102,7 @@ function initScheduleForm() {
 
     let rotateMin = 60;
     if (mode === "photo_album") {
-      rotateMin = document.getElementById("newRuleRotateMin").valueAsNumber;
+      rotateMin = byId("newRuleRotateMin").valueAsNumber;
       if (!Number.isInteger(rotateMin) || rotateMin < 10 || rotateMin > 1440) {
         alert("相册轮换间隔必须是 10~1440 分钟之间的整数！");
         return;
@@ -1050,7 +1120,7 @@ function initScheduleForm() {
     const nextConfig = cloneScheduleConfig();
     nextConfig.rules.unshift(newRule);
 
-    const autoSort = document.getElementById("autoSortCheckbox")?.checked;
+    const autoSort = byId("autoSortCheckbox")?.checked;
     if (autoSort) {
       nextConfig.rules = sortRulesSmart(nextConfig.rules);
     }
@@ -1059,7 +1129,7 @@ function initScheduleForm() {
     updateNewRuleHint();
   });
 
-  document.getElementById("fallbackModeSelect").addEventListener("change", async (e) => {
+  byId("fallbackModeSelect").addEventListener("change", async (e) => {
     if (scheduleBusy || !currentScheduleConfig) return;
     const nextConfig = cloneScheduleConfig();
     nextConfig.fallback_mode = e.target.value;
@@ -1067,8 +1137,8 @@ function initScheduleForm() {
   });
 
   // 时段类型切换时联动展示相册轮播间隔
-  document.getElementById("newRuleMode").addEventListener("change", (e) => {
-    const rotateGroup = document.getElementById("rotateIntervalGroup");
+  byId("newRuleMode").addEventListener("change", (e) => {
+    const rotateGroup = byId("rotateIntervalGroup");
     rotateGroup.style.display = e.target.value === "photo_album" ? "block" : "none";
   });
 }
@@ -1103,13 +1173,13 @@ async function saveScheduleConfig(nextConfig) {
     currentScheduleConfig = nextConfig;
     renderTimelineBar(nextConfig.rules);
     renderRuleList(nextConfig.rules);
-    document.getElementById("fallbackModeSelect").value = nextConfig.fallback_mode || "photo_album";
+    byId("fallbackModeSelect").value = nextConfig.fallback_mode || "photo_album";
     await loadSchedule();
     return true;
   } catch (err) {
     alert(`保存排程失败: ${err.message}`);
     if (currentScheduleConfig) {
-      document.getElementById("fallbackModeSelect").value = currentScheduleConfig.fallback_mode || "photo_album";
+      byId("fallbackModeSelect").value = currentScheduleConfig.fallback_mode || "photo_album";
     }
     return false;
   } finally {
@@ -1120,16 +1190,16 @@ async function saveScheduleConfig(nextConfig) {
 
 // ----------------- 即时便签推送 (Memo) -----------------
 function initMemoForm() {
-  const form = document.getElementById("memoPushForm");
-  const durationSlider = document.getElementById("memoDurationSlider");
-  const durationVal = document.getElementById("memoDurationVal");
+  const form = byId("memoPushForm");
+  const durationSlider = byId("memoDurationSlider");
+  const durationVal = byId("memoDurationVal");
 
   durationSlider.addEventListener("input", (e) => {
     durationVal.textContent = e.target.value;
   });
 
   // 快捷预设按钮
-  document.querySelectorAll(".duration-preset").forEach(btn => {
+  qsa(".duration-preset").forEach(btn => {
     btn.addEventListener("click", () => {
       const min = parseInt(btn.getAttribute("data-min"));
       durationSlider.value = min;
@@ -1139,8 +1209,8 @@ function initMemoForm() {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const title = document.getElementById("memoTitleInput").value.trim() || "📌 桌面备忘提醒";
-    const text = document.getElementById("memoTextInput").value.trim();
+    const title = byId("memoTitleInput").value.trim() || "📌 桌面备忘提醒";
+    const text = byId("memoTextInput").value.trim();
     const duration = parseInt(durationSlider.value) || 120;
 
     if (!text) {
@@ -1163,7 +1233,7 @@ function initMemoForm() {
         })
       });
       alert("便签已推送，已向 ESP32 网关发送即时刷新指令！");
-      document.getElementById("memoTextInput").value = "";
+      byId("memoTextInput").value = "";
       await loadMemoStatus();
     } catch (err) {
       alert(`推送失败: ${err.message}`);
@@ -1172,7 +1242,7 @@ function initMemoForm() {
     }
   });
 
-  document.getElementById("clearMemoBtn").addEventListener("click", async (e) => {
+  byId("clearMemoBtn").addEventListener("click", async (e) => {
     if (!confirm("确定撤回当前即时便签吗？")) return;
     const button = e.currentTarget;
     button.disabled = true;
@@ -1198,36 +1268,46 @@ async function loadMemoStatus() {
       throw new Error("便签状态响应格式无效");
     }
 
-    const card = document.getElementById("activeMemoCard");
+    const card = byId("activeMemoCard");
     if (memo.active) {
       const remainingSec = Number(memo.remaining_sec);
       if (!Number.isFinite(remainingSec) || remainingSec < 0) {
         throw new Error("便签剩余时间无效");
       }
       card.style.display = "block";
-      document.getElementById("activeMemoTitle").textContent = memo.title;
-      document.getElementById("activeMemoText").textContent = memo.text;
+      byId("activeMemoTitle").textContent = memo.title;
+      byId("activeMemoText").textContent = memo.text;
 
       const remainMin = Math.max(0, Math.ceil(remainingSec / 60));
-      document.getElementById("activeMemoExpire").textContent = `剩余展示约 ${remainMin} 分钟 (发布者: ${memo.sender})`;
+      byId("activeMemoExpire").textContent = `剩余展示约 ${remainMin} 分钟 (发布者: ${memo.sender})`;
     } else {
       card.style.display = "none";
     }
   } catch (err) {
     if (requestVersion !== memoStatusRequestVersion) return;
     console.error("获取便签状态失败:", err);
-    const card = document.getElementById("activeMemoCard");
+    const card = byId("activeMemoCard");
     if (card.style.display !== "none") {
-      document.getElementById("activeMemoExpire").textContent = "便签状态刷新失败，当前信息可能不是最新";
+      byId("activeMemoExpire").textContent = "便签状态刷新失败，当前信息可能不是最新";
     }
   }
 }
 
 // ----------------- 系统设置与日历/网关联动 -----------------
+function setStatusSpan(el, colorVar, text) {
+  if (!el) return;
+  el.textContent = "";
+  const span = document.createElement("span");
+  span.style.color = colorVar;
+  span.style.fontWeight = "600";
+  span.textContent = text;
+  el.appendChild(span);
+}
+
 async function updateCalendarStatusDisplay() {
-  const statusEl = document.getElementById("calendarSyncStatus");
-  const alertEl = document.getElementById("calendarGlobalAlert");
-  const alertMsgEl = document.getElementById("calendarGlobalAlertMsg");
+  const statusEl = byId("calendarSyncStatus");
+  const alertEl = byId("calendarGlobalAlert");
+  const alertMsgEl = byId("calendarGlobalAlertMsg");
 
   try {
     const data = await requestJson("/api/calendar");
@@ -1241,13 +1321,13 @@ async function updateCalendarStatusDisplay() {
     // 1. 设置页卡片状态提示
     if (statusEl) {
       if (isError) {
-        statusEl.innerHTML = `<span style="color: var(--conflict-full-text); font-weight: 600;">❌ 同步失败: ${data.message || "网络异常"} (更新于 ${ut})</span>`;
+        setStatusSpan(statusEl, "var(--conflict-full-text)", `❌ 同步失败: ${data.message || "网络异常"} (更新于 ${ut})`);
       } else if (isMock) {
-        statusEl.innerHTML = `<span style="color: var(--conflict-partial-text); font-weight: 600;">⚠️ 未配置 iCal URL，当前展示模拟日程 (共 ${count} 项，更新于 ${ut})</span>`;
+        setStatusSpan(statusEl, "var(--conflict-partial-text)", `⚠️ 未配置 iCal URL，当前展示模拟日程 (共 ${count} 项，更新于 ${ut})`);
       } else if (stale) {
-        statusEl.innerHTML = `<span style="color: var(--conflict-partial-text); font-weight: 600;">⚠️ 展示离线缓存 (共 ${count} 项): ${data.message || "网络受限"}</span>`;
+        setStatusSpan(statusEl, "var(--conflict-partial-text)", `⚠️ 展示离线缓存 (共 ${count} 项): ${data.message || "网络受限"}`);
       } else {
-        statusEl.innerHTML = `<span style="color: var(--conflict-ok-text); font-weight: 600;">✅ iCal 已同步 (${data.message || `找到 ${count} 项今日日程`}，更新于 ${ut})</span>`;
+        setStatusSpan(statusEl, "var(--conflict-ok-text)", `✅ iCal 已同步 (${data.message || `找到 ${count} 项今日日程`}，更新于 ${ut})`);
       }
     }
 
@@ -1262,7 +1342,7 @@ async function updateCalendarStatusDisplay() {
     }
   } catch (err) {
     if (statusEl) {
-      statusEl.innerHTML = `<span style="color: var(--conflict-full-text); font-weight: 600;">❌ 获取日历状态失败: ${err.message}</span>`;
+      setStatusSpan(statusEl, "var(--conflict-full-text)", `❌ 获取日历状态失败: ${err.message}`);
     }
     if (alertEl && alertMsgEl) {
       alertMsgEl.textContent = err.message;
@@ -1273,12 +1353,12 @@ async function updateCalendarStatusDisplay() {
 
 function initSettingsForm() {
   // 1. 早安天气看板: 刷新、预览与即时推送
-  const refreshWeatherBtn = document.getElementById("refreshWeatherBtn");
-  const previewWeatherBtn = document.getElementById("previewWeatherBtn");
-  const weatherPreviewBox = document.getElementById("weatherPreviewBox");
-  const weatherPreviewImg = document.getElementById("weatherPreviewImg");
-  const closeWeatherPreviewBtn = document.getElementById("closeWeatherPreviewBtn");
-  const pushWeatherNowBtn = document.getElementById("pushWeatherNowBtn");
+  const refreshWeatherBtn = byId("refreshWeatherBtn");
+  const previewWeatherBtn = byId("previewWeatherBtn");
+  const weatherPreviewBox = byId("weatherPreviewBox");
+  const weatherPreviewImg = byId("weatherPreviewImg");
+  const closeWeatherPreviewBtn = byId("closeWeatherPreviewBtn");
+  const pushWeatherNowBtn = byId("pushWeatherNowBtn");
 
   if (refreshWeatherBtn) {
     refreshWeatherBtn.addEventListener("click", async () => {
@@ -1288,7 +1368,7 @@ function initSettingsForm() {
         const data = await requestJson("/api/weather/refresh", { method: "POST" });
         alert(data.message || "天气数据已刷新！");
         if (weatherPreviewBox && weatherPreviewBox.style.display !== "none" && weatherPreviewImg) {
-          weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
+          loadAuthImage(weatherPreviewImg, `/api/weather/preview.png?t=${Date.now()}`);
         }
       } catch (err) {
         alert("刷新失败: " + err.message);
@@ -1302,7 +1382,7 @@ function initSettingsForm() {
   if (previewWeatherBtn && weatherPreviewBox && weatherPreviewImg) {
     previewWeatherBtn.addEventListener("click", () => {
       if (weatherPreviewBox.style.display === "none" || !weatherPreviewBox.style.display) {
-        weatherPreviewImg.src = resolveApiUrl(`/api/weather/preview.png?t=${Date.now()}`);
+        loadAuthImage(weatherPreviewImg, `/api/weather/preview.png?t=${Date.now()}`);
         weatherPreviewBox.style.display = "block";
       } else {
         weatherPreviewBox.style.display = "none";
@@ -1339,12 +1419,12 @@ function initSettingsForm() {
   }
 
   // 2. 今日日程看板: 同步、预览与即时推送
-  const syncCalBtn = document.getElementById("syncCalendarBtn");
-  const previewCalBtn = document.getElementById("previewCalendarBtn");
-  const calendarPreviewBox = document.getElementById("calendarPreviewBox");
-  const calendarPreviewImg = document.getElementById("calendarPreviewImg");
-  const closeCalPreviewBtn = document.getElementById("closeCalendarPreviewBtn");
-  const pushCalNowBtn = document.getElementById("pushCalendarNowBtn");
+  const syncCalBtn = byId("syncCalendarBtn");
+  const previewCalBtn = byId("previewCalendarBtn");
+  const calendarPreviewBox = byId("calendarPreviewBox");
+  const calendarPreviewImg = byId("calendarPreviewImg");
+  const closeCalPreviewBtn = byId("closeCalendarPreviewBtn");
+  const pushCalNowBtn = byId("pushCalendarNowBtn");
 
   if (syncCalBtn) {
     syncCalBtn.addEventListener("click", async () => {
@@ -1353,7 +1433,7 @@ function initSettingsForm() {
       try {
         const data = await requestJson("/api/calendar/refresh", { method: "POST" });
         if (calendarPreviewBox && calendarPreviewBox.style.display !== "none" && calendarPreviewImg) {
-          calendarPreviewImg.src = resolveApiUrl(`/api/calendar/preview.png?t=${Date.now()}`);
+          loadAuthImage(calendarPreviewImg, `/api/calendar/preview.png?t=${Date.now()}`);
         }
         if (data.status === "error" || (data.data && data.data.status === "error")) {
           const errMsg = (data.data && data.data.message) || data.message || "拉取失败";
@@ -1374,7 +1454,7 @@ function initSettingsForm() {
   if (previewCalBtn && calendarPreviewBox && calendarPreviewImg) {
     previewCalBtn.addEventListener("click", () => {
       if (calendarPreviewBox.style.display === "none" || !calendarPreviewBox.style.display) {
-        calendarPreviewImg.src = resolveApiUrl(`/api/calendar/preview.png?t=${Date.now()}`);
+        loadAuthImage(calendarPreviewImg, `/api/calendar/preview.png?t=${Date.now()}`);
         calendarPreviewBox.style.display = "block";
       } else {
         calendarPreviewBox.style.display = "none";
@@ -1411,7 +1491,7 @@ function initSettingsForm() {
   }
 
   // 3. 网关手动触发按钮
-  const testGatewayBtn = document.getElementById("testGatewayBtn");
+  const testGatewayBtn = byId("testGatewayBtn");
   if (testGatewayBtn) {
     testGatewayBtn.addEventListener("click", async () => {
       testGatewayBtn.disabled = true;
@@ -1432,7 +1512,7 @@ function initSettingsForm() {
   }
 
   // 4. 硬件原生万年历指令触发按钮
-  const triggerNativeCalBtn = document.getElementById("triggerNativeCalBtn");
+  const triggerNativeCalBtn = byId("triggerNativeCalBtn");
   if (triggerNativeCalBtn) {
     triggerNativeCalBtn.addEventListener("click", async () => {
       triggerNativeCalBtn.disabled = true;
@@ -1458,13 +1538,17 @@ async function loadSettings() {
     const data = await requestJson("/api/settings");
     if (!data) return;
 
-    const gwDisplay = document.getElementById("gatewayUrlDisplay");
+    const gwDisplay = byId("gatewayUrlDisplay");
     if (gwDisplay) {
       gwDisplay.textContent = data.gateway_url || "未配置";
     }
-    const gwFooter = document.getElementById("gatewayUrlFooter");
+    const gwFooter = byId("gatewayUrlFooter");
     if (gwFooter) {
       gwFooter.textContent = data.gateway_url || "未配置";
+    }
+    const screenBinEl = byId("screenBinPathDisplay");
+    if (screenBinEl && data.screen_bin_path) {
+      screenBinEl.textContent = `GET ${data.screen_bin_path}`;
     }
 
     await updateCalendarStatusDisplay();

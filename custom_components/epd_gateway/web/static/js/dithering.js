@@ -235,3 +235,11 @@ function processImageDataToBinary(imageData) {
   result.set(redWhiteData, channelLen);
   return result;
 }
+
+if (typeof globalThis !== "undefined") {
+  globalThis.adjustContrast = adjustContrast;
+  globalThis.floydSteinbergDither = floydSteinbergDither;
+  globalThis.atkinsonDither = atkinsonDither;
+  globalThis.thresholdDither = thresholdDither;
+  globalThis.processImageDataToBinary = processImageDataToBinary;
+}

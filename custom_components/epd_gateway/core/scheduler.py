@@ -105,13 +105,13 @@ class Scheduler:
                 candidates.append(max(1, math.ceil(seconds)))
 
         if active_rule:
-            end_dt = datetime.combine(now.date(), self._parse_hm(active_rule.end))
+            end_dt = datetime.combine(now.date(), self._parse_hm(active_rule.end), tzinfo=now.tzinfo)
             if end_dt <= now:
                 end_dt += timedelta(days=1)
             add_candidate(end_dt)
 
         for rule in self.config.rules:
-            start_dt = datetime.combine(now.date(), self._parse_hm(rule.start))
+            start_dt = datetime.combine(now.date(), self._parse_hm(rule.start), tzinfo=now.tzinfo)
             if start_dt <= now:
                 start_dt += timedelta(days=1)
             add_candidate(start_dt)
@@ -128,7 +128,7 @@ class Scheduler:
                 interval_min = 30
             interval_sec = max(10, min(1440, interval_min)) * 60
             candidates.append(interval_sec - int(now.timestamp() % interval_sec))
-            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0))
+            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0), tzinfo=now.tzinfo)
             add_candidate(next_midnight)
         elif active_mode == "calendar_todo":
             interval_min = active_rule.config.get("interval_min", 30) if active_rule else 30
@@ -136,10 +136,10 @@ class Scheduler:
                 interval_min = 30
             interval_sec = max(10, min(1440, interval_min)) * 60
             candidates.append(interval_sec - int(now.timestamp() % interval_sec))
-            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0))
+            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0), tzinfo=now.tzinfo)
             add_candidate(next_midnight)
         elif active_mode == "clock":
-            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0))
+            next_midnight = datetime.combine(now.date() + timedelta(days=1), dtime(0, 0), tzinfo=now.tzinfo)
             add_candidate(next_midnight)
 
         if not candidates:

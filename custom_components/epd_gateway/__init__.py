@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 from typing import Any, Dict
 
 try:
@@ -13,7 +14,8 @@ except ImportError:
     vol = None  # type: ignore[assignment]
 
 try:
-    from homeassistant.components import frontend
+    from homeassistant.components import frontend, panel_custom
+    from homeassistant.components.http import StaticPathConfig
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.const import Platform
     from homeassistant.core import HomeAssistant, ServiceCall
@@ -28,14 +30,16 @@ try:
 except ImportError:
     HAS_HOMEASSISTANT = False
     frontend = None  # type: ignore[assignment]
+    panel_custom = None  # type: ignore[assignment]
+    StaticPathConfig = None  # type: ignore[assignment,misc]
     ConfigEntry = Any  # type: ignore[assignment,misc]
     HomeAssistant = Any  # type: ignore[assignment,misc]
     ServiceCall = Any  # type: ignore[assignment,misc]
     PLATFORMS = ["select", "button", "sensor", "image", "notify"]  # type: ignore[assignment]
 
 from .const import (
-    API_BASE_PATH,
     CONF_REGISTER_PANEL,
+    CONF_SCREEN_TOKEN,
     DEFAULT_REGISTER_PANEL,
     DISPLAY_MODES,
     DOMAIN,
@@ -61,22 +65,36 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN) if cv is not None els
 _LOGGER = logging.getLogger(__name__)
 
 
-def _register_sidebar_panel(hass: HomeAssistant, enable: bool) -> None:
-    """Register or remove the EPD Gateway Web Workbench sidebar panel in Home Assistant."""
+async def _register_sidebar_panel(hass: HomeAssistant, enable: bool) -> None:
+    """Register or remove the EPD Gateway custom panel in Home Assistant."""
     if not HAS_HOMEASSISTANT or frontend is None:
         return
     try:
         if enable:
-            frontend.async_register_built_in_panel(
-                hass,
-                component_name="iframe",
-                sidebar_title=PANEL_TITLE,
-                sidebar_icon=PANEL_ICON,
-                frontend_url_path=PANEL_URL_PATH,
-                config={"url": f"{API_BASE_PATH}/panel"},
-                require_admin=False,
-                update=True,
-            )
+            domain_data = hass.data.setdefault(DOMAIN, {})
+            if not domain_data.get("static_registered") and hasattr(hass, "http") and StaticPathConfig is not None:
+                web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+                await hass.http.async_register_static_paths(
+                    [
+                        StaticPathConfig(
+                            url_path=f"/{DOMAIN}_static",
+                            path=web_dir,
+                            cache_headers=False,
+                        )
+                    ]
+                )
+                domain_data["static_registered"] = True
+
+            if panel_custom is not None:
+                await panel_custom.async_register_panel(
+                    hass,
+                    frontend_url_path=PANEL_URL_PATH,
+                    webcomponent_name="epd-gateway-panel",
+                    sidebar_title=PANEL_TITLE,
+                    sidebar_icon=PANEL_ICON,
+                    module_url=f"/{DOMAIN}_static/panel.js?v=0.4.0",
+                    require_admin=False,
+                )
         else:
             frontend.async_remove_panel(hass, PANEL_URL_PATH)
     except Exception as exc:
@@ -112,7 +130,7 @@ def _register_services(hass: HomeAssistant, coordinator: EpdGatewayCoordinator) 
         await coordinator.notifier.trigger_sync()
 
     async def handle_trigger_native_calendar(call: ServiceCall) -> None:
-        await coordinator.notifier.trigger_calendar_mode()
+        await coordinator.notifier.trigger_calendar_mode(timezone=coordinator.get_tz_offset_hours())
 
     async def handle_set_fallback_mode(call: ServiceCall) -> None:
         mode = str(call.data.get("mode", "photo_album")).strip()
@@ -154,29 +172,33 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     if hasattr(hass, "config_entries") and not hass.config_entries.async_entries(DOMAIN):
         yaml_cfg = config.get(DOMAIN) if isinstance(config.get(DOMAIN), dict) else {}
         settings_path = hass.config.path("epd_gateway_data", "settings.json")
-        if DOMAIN in config or os.path.exists(settings_path):
-            import_data: Dict[str, Any] = dict(yaml_cfg)
-            if os.path.exists(settings_path):
-                try:
-                    def _read_settings() -> Dict[str, Any]:
-                        with open(settings_path, "r", encoding="utf-8") as handle:
-                            return json.load(handle)
 
-                    disk_settings = await hass.async_add_executor_job(_read_settings)
-                    if isinstance(disk_settings, dict):
-                        for k in (
-                            "gateway_url",
-                            "weather_city",
-                            "calendar_ical_url",
-                            "weather_entity",
-                            "calendar_entity",
-                            "indoor_temp_entity",
-                            "indoor_humidity_entity",
-                        ):
-                            if disk_settings.get(k) and not import_data.get(k):
-                                import_data[k] = disk_settings[k]
-                except Exception as exc:
-                    _LOGGER.debug("Auto-import settings read skipped: %s", exc)
+        def _read_settings() -> Dict[str, Any] | None:
+            if not os.path.exists(settings_path):
+                return None
+            with open(settings_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+
+        disk_settings: Dict[str, Any] | None = None
+        try:
+            disk_settings = await hass.async_add_executor_job(_read_settings)
+        except Exception as exc:
+            _LOGGER.debug("Auto-import settings read skipped: %s", exc)
+
+        if DOMAIN in config or disk_settings is not None:
+            import_data: Dict[str, Any] = dict(yaml_cfg)
+            if isinstance(disk_settings, dict):
+                for k in (
+                    "gateway_url",
+                    "weather_city",
+                    "calendar_ical_url",
+                    "weather_entity",
+                    "calendar_entity",
+                    "indoor_temp_entity",
+                    "indoor_humidity_entity",
+                ):
+                    if disk_settings.get(k) and not import_data.get(k):
+                        import_data[k] = disk_settings[k]
 
             hass.async_create_task(
                 hass.config_entries.flow.async_init(
@@ -191,7 +213,13 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up EPD Gateway from a config entry."""
     hass.data.setdefault(DOMAIN, {})
-    merged_config = {**(entry.data or {}), **(entry.options or {})}
+    entry_data = dict(entry.data or {})
+    if not entry_data.get(CONF_SCREEN_TOKEN):
+        entry_data[CONF_SCREEN_TOKEN] = secrets.token_urlsafe(32)
+        if hasattr(hass, "config_entries"):
+            hass.config_entries.async_update_entry(entry, data=entry_data)
+
+    merged_config = {**entry_data, **(entry.options or {})}
 
     data_dir = hass.config.path("epd_gateway_data")
     coordinator = await hass.async_add_executor_job(
@@ -205,7 +233,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN]["entry"] = entry
 
     register_http_views(hass)
-    _register_sidebar_panel(hass, merged_config.get(CONF_REGISTER_PANEL, DEFAULT_REGISTER_PANEL))
+    await _register_sidebar_panel(hass, merged_config.get(CONF_REGISTER_PANEL, DEFAULT_REGISTER_PANEL))
     _register_services(hass, coordinator)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -218,15 +246,16 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     merged_config = {**(entry.data or {}), **(entry.options or {})}
     coordinator: EpdGatewayCoordinator | None = hass.data.get(DOMAIN, {}).get("coordinator")
     if coordinator is not None:
-        coordinator.update_from_config_entry(merged_config)
-    _register_sidebar_panel(hass, merged_config.get(CONF_REGISTER_PANEL, DEFAULT_REGISTER_PANEL))
+        await hass.async_add_executor_job(coordinator.update_from_config_entry, merged_config)
+        coordinator.notify_listeners()
+    await _register_sidebar_panel(hass, merged_config.get(CONF_REGISTER_PANEL, DEFAULT_REGISTER_PANEL))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        _register_sidebar_panel(hass, False)
+        await _register_sidebar_panel(hass, False)
         for srv in (
             SERVICE_PUSH_MEMO,
             SERVICE_CLEAR_MEMO,

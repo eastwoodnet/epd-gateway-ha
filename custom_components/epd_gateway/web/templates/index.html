@@ -59,7 +59,7 @@
           <b>iCal 在线日历同步异常:</b> <span id="calendarGlobalAlertMsg">连接受限</span>
           <span style="margin-left: 8px; font-size: 12px; opacity: 0.85;">(可在「看板画廊与调试」或 Home Assistant 集成配置中检查)</span>
         </div>
-        <button type="button" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="document.getElementById('calendarGlobalAlert').style.display='none'">忽略</button>
+        <button type="button" id="dismissCalendarAlertBtn" class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;">忽略</button>
       </div>
 
       <div class="card">
@@ -202,9 +202,9 @@
           <div id="saveSlotButtons" style="display: none; flex-direction: column; gap: 8px; margin-top: 20px;">
             <label style="font-weight: 600; color: var(--accent-primary);">保存调优效果至服务器卡槽:</label>
             <div class="action-row">
-              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(1)">存入卡槽 1</button>
-              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(2)">存入卡槽 2</button>
-              <button class="btn btn-primary" style="flex: 1;" onclick="saveCurrentToSlot(3)">存入卡槽 3</button>
+              <button type="button" class="btn btn-primary save-slot-btn" data-slot="1" style="flex: 1;">存入卡槽 1</button>
+              <button type="button" class="btn btn-primary save-slot-btn" data-slot="2" style="flex: 1;">存入卡槽 2</button>
+              <button type="button" class="btn btn-primary save-slot-btn" data-slot="3" style="flex: 1;">存入卡槽 3</button>
             </div>
           </div>
         </div>
@@ -403,7 +403,7 @@
             </div>
 
             <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
-              <b>网关拉取接口:</b> <code>GET /api/epd_gateway/screen.bin</code> (兼容 <code>/screen.bin</code>)<br>
+              <b>网关拉取接口 (含独立安全密钥):</b> <code id="screenBinPathDisplay">GET /api/epd_gateway/screen/&lt;token&gt;.bin</code><br>
               <b>当前设备分辨率:</b> 400 × 300 (4.2寸 三色 BWR)<br>
               <b>省电通信机制:</b> 免打扰与未变更画面直接返回 304 零蓝牙通信
             </div>

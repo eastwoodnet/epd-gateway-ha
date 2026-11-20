@@ -10,6 +10,7 @@ CONF_INDOOR_HUMIDITY_ENTITY = "indoor_humidity_entity"
 CONF_WEATHER_CITY = "weather_city"
 CONF_CALENDAR_ICAL_URL = "calendar_ical_url"
 CONF_REGISTER_PANEL = "register_panel"
+CONF_SCREEN_TOKEN = "screen_token"
 
 DEFAULT_GATEWAY_URL = "http://192.168.1.100"
 DEFAULT_WEATHER_CITY = ""

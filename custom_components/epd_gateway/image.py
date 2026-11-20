@@ -66,7 +66,7 @@ class EpdScreenPreviewImage(ImageEntity):
 
     async def async_added_to_hass(self) -> None:
         def _on_update() -> None:
-            self._attr_image_last_updated = self.coordinator.last_updated_dt or datetime.now()
+            self._attr_image_last_updated = self.coordinator.last_updated_dt or self.coordinator.get_local_now()
             self.async_write_ha_state()
 
         self.async_on_remove(self.coordinator.add_listener(_on_update))

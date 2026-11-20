@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import io
 import json
-import mimetypes
 import os
 import time
 from typing import Any, Optional
@@ -29,7 +29,7 @@ except ImportError:
         url: str = ""
         extra_urls: list[str] = []
         name: str = ""
-        requires_auth: bool = False
+        requires_auth: bool = True
 
 from .const import (
     API_BASE_PATH,
@@ -80,18 +80,31 @@ def _format_validation_error(exc: ValidationError) -> str:
     return str(exc)
 
 
-class EpdScreenBinView(HomeAssistantView):
-    """Serves the 30,000-byte BWR screen payload to the ESP32 Gateway (100% identical to server/main.py)."""
+def _is_admin_request(request: web.Request) -> bool:
+    """Return True if running outside HA or if the authenticated HA user is an admin."""
+    if request.app.get("hass") is None:
+        return True
+    user = request.get("hass_user")
+    return bool(user is not None and getattr(user, "is_admin", False))
 
-    url = f"{API_BASE_PATH}/screen.bin"
-    extra_urls = ["/screen.bin"]
+
+class EpdScreenBinView(HomeAssistantView):
+    """Serves the 30,000-byte BWR screen payload to the ESP32 Gateway using a per-entry secret token."""
+
+    url = f"{API_BASE_PATH}/screen/{{token}}.bin"
+    extra_urls = [f"{API_BASE_PATH}/screen.bin"]
     name = "api:epd_gateway:screen_bin"
     requires_auth = False
 
-    async def get(self, request: web.Request) -> web.Response:
+    async def get(self, request: web.Request, token: str = "") -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
+
+        provided_token = (token or request.query.get("token", "")).strip()
+        expected_token = getattr(coord, "screen_token", "") or ""
+        if not expected_token or not provided_token or not hmac.compare_digest(provided_token, expected_token):
+            return _json_response({"detail": "Unauthorized"}, status=401)
 
         client_etag = request.headers.get("if-none-match")
         result = await coord.async_render_screen(client_etag=client_etag)
@@ -103,75 +116,12 @@ class EpdScreenBinView(HomeAssistantView):
         )
 
 
-class EpdPanelView(HomeAssistantView):
-    """Serves the full Web Workbench (24H Schedule + 3-Slot Photo Studio + Memo + Settings)."""
-
-    url = f"{API_BASE_PATH}/panel"
-    extra_urls = [f"{API_BASE_PATH}/panel/"]
-    name = "api:epd_gateway:panel"
-    requires_auth = False
-
-    async def get(self, request: web.Request) -> web.Response:
-        if not os.path.exists(INDEX_HTML_PATH):
-            return web.Response(text="Workbench template not found", status=404)
-        hass = request.app.get("hass")
-        if hass is not None and hasattr(hass, "async_add_executor_job"):
-            def _read_html() -> str:
-                with open(INDEX_HTML_PATH, "r", encoding="utf-8") as handle:
-                    return handle.read()
-            html_content = await hass.async_add_executor_job(_read_html)
-        else:
-            with open(INDEX_HTML_PATH, "r", encoding="utf-8") as handle:
-                html_content = handle.read()
-        return web.Response(
-            text=html_content,
-            status=200,
-            content_type="text/html",
-            charset="utf-8",
-        )
-
-
-class EpdStaticAssetView(HomeAssistantView):
-    """Serves static CSS and JS files for the EPD Gateway Web Workbench."""
-
-    url = f"{API_BASE_PATH}/static/{{filepath:.*}}"
-    name = "api:epd_gateway:static"
-    requires_auth = False
-
-    async def get(self, request: web.Request, filepath: str) -> web.Response:
-        safe_root = os.path.realpath(STATIC_DIR)
-        target_path = os.path.realpath(os.path.join(safe_root, filepath))
-        if not target_path.startswith(safe_root + os.sep) or not os.path.isfile(target_path):
-            return web.Response(text="Not Found", status=404)
-
-        mime_type, _ = mimetypes.guess_type(target_path)
-        if target_path.endswith(".css"):
-            mime_type = "text/css"
-        elif target_path.endswith(".js"):
-            mime_type = "application/javascript"
-
-        hass = request.app.get("hass")
-        if hass is not None and hasattr(hass, "async_add_executor_job"):
-            def _read_bytes() -> bytes:
-                with open(target_path, "rb") as handle:
-                    return handle.read()
-            content = await hass.async_add_executor_job(_read_bytes)
-        else:
-            with open(target_path, "rb") as handle:
-                content = handle.read()
-        return web.Response(
-            body=content,
-            status=200,
-            content_type=mime_type or "application/octet-stream",
-        )
-
-
 class EpdScheduleView(HomeAssistantView):
-    """GET and POST 24-hour schedule rules and fallback mode (100% identical to server/main.py)."""
+    """GET and POST 24-hour schedule rules and fallback mode."""
 
     url = f"{API_BASE_PATH}/schedule"
     name = "api:epd_gateway:schedule"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -179,7 +129,8 @@ class EpdScheduleView(HomeAssistantView):
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
         active_rule, active_mode, next_pull = coord.scheduler.get_current_rule(
-            fallback_rotate_min=coord.settings_mgr.settings.rotate_interval_min
+            now=coord.get_local_now(),
+            fallback_rotate_min=coord.settings_mgr.settings.rotate_interval_min,
         )
         return _json_response({
             "config": coord.scheduler.config.model_dump(),
@@ -212,7 +163,7 @@ class EpdAlbumSlotsView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/album/slots"
     name = "api:epd_gateway:album_slots"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -226,7 +177,7 @@ class EpdAlbumSlotDetailView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/album/slot/{{slot_id}}"
     name = "api:epd_gateway:album_slot_detail"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request, slot_id: str) -> web.Response:
         coord = _get_coordinator(request)
@@ -279,7 +230,7 @@ class EpdAlbumPreviewView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/album/preview/{{slot_id}}.png"
     name = "api:epd_gateway:album_preview"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request, slot_id: str) -> web.Response:
         coord = _get_coordinator(request)
@@ -306,12 +257,11 @@ class EpdAlbumPreviewView(HomeAssistantView):
 
 
 class EpdMemoPushView(HomeAssistantView):
-    """POST/GET to push an instant memo and DELETE to clear active memo (100% identical to server/main.py)."""
+    """POST to push an instant memo and DELETE to clear active memo."""
 
     url = f"{API_BASE_PATH}/push"
-    extra_urls = ["/api/push"]
     name = "api:epd_gateway:push"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -338,37 +288,6 @@ class EpdMemoPushView(HomeAssistantView):
             "memo": state.model_dump(),
         })
 
-    async def get(self, request: web.Request) -> web.Response:
-        """GET push endpoint for iPhone Shortcuts / Bark style triggers."""
-        coord = _get_coordinator(request)
-        if coord is None:
-            return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
-
-        text = request.query.get("text", "")
-        title = request.query.get("title", "📌 桌面备忘提醒")
-        duration_raw = request.query.get("duration_min")
-        sender = request.query.get("sender", "快捷指令")
-
-        try:
-            duration_min = (
-                int(duration_raw)
-                if duration_raw is not None
-                else coord.settings_mgr.settings.default_memo_duration_min
-            )
-            req = MemoRequest(
-                text=text,
-                title=title,
-                duration_min=duration_min,
-                sender=sender,
-            )
-        except ValidationError as exc:
-            return _json_response({"detail": _format_validation_error(exc)}, status=422)
-        except Exception as exc:
-            return _json_response({"detail": str(exc)}, status=400)
-
-        state = await coord._run_in_executor(coord.activate_memo, req)
-        return _json_response({"status": "ok", "message": "便签已推送", "memo": state.model_dump()})
-
     async def delete(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
@@ -385,7 +304,7 @@ class EpdMemoStatusView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/memo/status"
     name = "api:epd_gateway:memo_status"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -399,20 +318,27 @@ class EpdMemoStatusView(HomeAssistantView):
 
 
 class EpdSettingsView(HomeAssistantView):
-    """GET and POST system settings (100% identical to server/main.py)."""
+    """GET and POST system settings (admin only)."""
 
     url = f"{API_BASE_PATH}/settings"
     name = "api:epd_gateway:settings"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
+        if not _is_admin_request(request):
+            return _json_response({"detail": "需要管理员权限"}, status=403)
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
-        return _json_response(coord.settings_mgr.settings.model_dump())
+        payload = coord.settings_mgr.settings.model_dump()
+        token = getattr(coord, "screen_token", "") or ""
+        payload["screen_bin_path"] = f"{API_BASE_PATH}/screen/{token}.bin" if token else f"{API_BASE_PATH}/screen.bin"
+        return _json_response(payload)
 
     async def post(self, request: web.Request) -> web.Response:
+        if not _is_admin_request(request):
+            return _json_response({"detail": "需要管理员权限"}, status=403)
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
@@ -475,7 +401,7 @@ class EpdWeatherView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/weather"
     name = "api:epd_gateway:weather"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -492,7 +418,7 @@ class EpdWeatherRefreshView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/weather/refresh"
     name = "api:epd_gateway:weather_refresh"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -510,7 +436,7 @@ class EpdWeatherPreviewView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/weather/preview.png"
     name = "api:epd_gateway:weather_preview"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -546,15 +472,14 @@ class EpdCalendarView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/calendar"
     name = "api:epd_gateway:calendar"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
-        url_param = request.query.get("url")
-        data = await coord.async_get_calendar_data(force_refresh=False, custom_url=url_param)
+        data = await coord.async_get_calendar_data(force_refresh=False)
         return _json_response(data)
 
 
@@ -563,15 +488,14 @@ class EpdCalendarRefreshView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/calendar/refresh"
     name = "api:epd_gateway:calendar_refresh"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
-        url_param = request.query.get("url")
-        data = await coord.async_get_calendar_data(force_refresh=True, custom_url=url_param)
+        data = await coord.async_get_calendar_data(force_refresh=True)
         coord.notifier.trigger_sync_background()
         return _json_response({
             "status": "ok",
@@ -585,15 +509,14 @@ class EpdCalendarPreviewView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/calendar/preview.png"
     name = "api:epd_gateway:calendar_preview"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
-        url_param = request.query.get("url")
-        cal_data = await coord.async_get_calendar_data(custom_url=url_param)
+        cal_data = await coord.async_get_calendar_data()
         raw_bin = await coord._run_in_executor(
             render_calendar_image,
             cal_data,
@@ -621,7 +544,7 @@ class EpdTriggerView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/trigger"
     name = "api:epd_gateway:trigger"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
@@ -640,18 +563,20 @@ class EpdDeviceCalendarView(HomeAssistantView):
 
     url = f"{API_BASE_PATH}/device/calendar"
     name = "api:epd_gateway:device_calendar"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
         coord = _get_coordinator(request)
         if coord is None:
             return _json_response({"detail": "EPD Gateway 尚未初始化"}, status=503)
 
-        now_ts = int(time.time())
-        success = await coord.notifier.trigger_calendar_mode(timestamp=now_ts, timezone=8)
+        now_dt = coord.get_local_now()
+        now_ts = int(now_dt.timestamp())
+        tz_hours = coord.get_tz_offset_hours()
+        success = await coord.notifier.trigger_calendar_mode(timestamp=now_ts, timezone=tz_hours)
         if success:
             coord._last_dispatched_mode = "clock"
-            coord._last_calendar_sync_date = time.strftime("%Y-%m-%d", time.localtime(now_ts))
+            coord._last_calendar_sync_date = now_dt.strftime("%Y-%m-%d")
         return _json_response({
             "status": "ok" if success else "failed",
             "message": "已切换墨水屏至硬件原生万年历并完成时间校准" if success else "网关连接超时或墨水屏切换失败",
@@ -660,8 +585,6 @@ class EpdDeviceCalendarView(HomeAssistantView):
 
 ALL_VIEWS = [
     EpdScreenBinView,
-    EpdPanelView,
-    EpdStaticAssetView,
     EpdScheduleView,
     EpdAlbumSlotsView,
     EpdAlbumSlotDetailView,

@@ -81,9 +81,9 @@ ESP32-C3 作为墨水屏的无线中继，负责通过 WiFi 从 Home Assistant �
    ```
 3. 在 Web 配置界面中完成两项设定：
    - **WiFi 设置**：填入家庭 2.4G WiFi 的 SSID 与密码。
-   - **网关配置**：将「图片拉取 URL」设置为您的 Home Assistant 地址：
+   - **网关配置**：将「图片拉取 URL」设置为集成页面显示的专属安全拉取地址（含随机密钥）：
      ```text
-     http://<HomeAssistant_IP>:8123/api/epd_gateway/screen.bin
+     http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin
      ```
 4. 点击「保存并连接」，ESP32 将自动重启并连接到您的家庭局域网。
 
@@ -93,7 +93,7 @@ ESP32-C3 作为墨水屏的无线中继，负责通过 WiFi 从 Home Assistant �
 如果您通过 USB 数据线连接着电脑终端（波特率 `115200`），也可以直接通过串口控制台免热点交互配置：
 ```text
 wifi <SSID> <PASSWORD>                                   # 配置并连接 WiFi
-server http://<HomeAssistant_IP>:8123/api/epd_gateway/screen.bin  # 配置拉取 URL
+server http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin  # 配置拉取 URL
 status                                                   # 查看当前连接状态与 IP
 reboot                                                   # 重启网关
 ```
@@ -118,14 +118,13 @@ reboot                                                   # 重启网关
 ---
 
 ### 步骤 2：配置 ESP32 硬件网关拉取地址
-登录您的 ESP32 网关 Web 管理后台（或通过局域网 API），将图片拉取 URL 配置为 Home Assistant 的服务地址：
+添加集成后，打开侧边栏「EPD 墨水屏」工作台的 **「系统设置与网关」** 标签页，复制页面底部为您生成的专属安全拉取 URL，填入 ESP32 网关 Web 管理后台：
 ```text
-http://<HomeAssistant_IP>:8123/api/epd_gateway/screen.bin
+http://<HomeAssistant_IP>:8123/api/epd_gateway/screen/<YOUR_SCREEN_TOKEN>.bin
 ```
-*(注：集成同时也兼容了短路径 `http://<HomeAssistant_IP>:8123/screen.bin`)*
 
 > [!NOTE]
-> 该接口专为 ESP32 客户端放行，无需传递 Bearer Token，支持标准 HTTP ETag。当排程未变或处于免打扰时直接响应 `304 Not Modified`，最大化延长墨水屏与网关寿命。
+> 该接口由每个集成条目独立生成的随机高强度密钥保护（使用 `hmac.compare_digest` 校验），专为 ESP32 客户端设计并支持标准 HTTP ETag。当排程未变或处于免打扰时直接响应 `304 Not Modified`，最大化延长墨水屏与网关寿命。
 
 ---
 
@@ -166,32 +165,20 @@ data:
 ```
 如需提前撤回便签恢复常规排程，调用动作 `epd_gateway.clear_memo` 即可。
 
-#### 方式 C：iPhone 快捷指令 / Bark 风格 URL 触发
-在 iPhone「快捷指令」App 中添加「获取 URL 内容」，填写：
-```text
-GET http://<HomeAssistant_IP>:8123/api/epd_gateway/push?text=今晚开会&title=重要备忘&duration_min=60
-```
-或直接使用短链接：
-```text
-GET http://<HomeAssistant_IP>:8123/api/push?text=今晚开会
-```
-无论在手机桌面小组件或 Siri 语音触发，屏幕均可在秒级内同步刷新！
+#### 方式 C：iPhone 快捷指令 / 远程自动化触发
+在 iPhone「快捷指令」App 中直接选用 Home Assistant 官方 Companion App 提供的原生动作：
+- 动作选择：`Home Assistant -> 调用服务 (Call Service)`
+- 服务选择：`epd_gateway.push_memo`
+- 参数填入：`{"title": "重要备忘", "text": "今晚开会", "duration_min": 60}`
+
+无论在手机桌面小组件还是 Siri 语音触发，均可经由 HA 官方加密通道鉴权并在秒级内同步刷新！
 
 > [!TIP]
-> **关于 8123 端口认证与安全调用说明：**
-> 1. **局域网内 (LAN) 免认证直连**：
->    插件在 Home Assistant 视图注册层已显式声明 `requires_auth = False`，这意味着**在家庭局域网内，iPhone、脚本或第三方系统调用 `/api/epd_gateway/push` 与 `/api/push` 时，无需携带任何 Token 或认证凭据**，开箱即可调用。
-> 2. **外网远程推送推荐方式（iOS Home Assistant App 原生动作）**：
->    若您身处外网（4G/5G），**最优雅、最安全的方式是不向公网暴露 8123 端口**。在 iPhone「快捷指令」中直接选用 Home Assistant 官方 App 提供的原生动作：
->    - 动作选择：`Home Assistant -> 调用服务 (Call Service)`
->    - 服务选择：`epd_gateway.push_memo`
->    - 参数填入：`{"title": "外网备忘", "text": "提醒回家买牛奶"}`
->    - 该方式完全经由 HA 官方的加密安全通道（Nabu Casa 或家庭反代）双向鉴权，安全无虞。
-> 3. **外网 HTTP API 鉴权调用**：
->    若您通过第三方自动化平台或公网 HTTP 接口调用反代后的 HA，只需在请求 Header 中附加标准的 HA 长期访问令牌 (Long-Lived Access Token)：
->    ```text
->    Authorization: Bearer <YOUR_LONG_LIVED_ACCESS_TOKEN>
->    ```
+> **关于 HTTP API 鉴权调用：**
+> 所有工作台管理与便签推送接口均已启用 Home Assistant 标准身份鉴权 (`requires_auth = True`)。若需通过第三方脚本调用 `POST /api/epd_gateway/push`，请在请求头中附加 HA 长期访问令牌 (Long-Lived Access Token)：
+> ```text
+> Authorization: Bearer <YOUR_LONG_LIVED_ACCESS_TOKEN>
+> ```
 
 ---
 
