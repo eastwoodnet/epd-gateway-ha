@@ -1,5 +1,5 @@
-import "./static/js/dithering.js?v=0.4.0";
-import { initEpdWorkbench } from "./static/js/app.js?v=0.4.0";
+import "./static/js/dithering.js?v=0.4.1";
+import { initEpdWorkbench } from "./static/js/app.js?v=0.4.1";
 
 window.EPD_API_PREFIX = "/api/epd_gateway";
 

@@ -92,7 +92,7 @@ async def _register_sidebar_panel(hass: HomeAssistant, enable: bool) -> None:
                     webcomponent_name="epd-gateway-panel",
                     sidebar_title=PANEL_TITLE,
                     sidebar_icon=PANEL_ICON,
-                    module_url=f"/{DOMAIN}_static/panel.js?v=0.4.0",
+                    module_url=f"/{DOMAIN}_static/panel.js?v=0.4.1",
                     require_admin=False,
                 )
         else:

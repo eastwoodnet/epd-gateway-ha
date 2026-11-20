@@ -961,9 +961,10 @@ function renderRuleList(rules) {
     upButton.className = "btn-icon";
     upButton.textContent = "▲";
     upButton.title = "上移（提高规则匹配优先级）";
-    upButton.dataset = { edgeDisabled: idx === 0 ? "true" : "false" };
     if (typeof upButton.setAttribute === "function") {
       upButton.setAttribute("data-edge-disabled", idx === 0 ? "true" : "false");
+    } else if (upButton.dataset) {
+      upButton.dataset.edgeDisabled = idx === 0 ? "true" : "false";
     }
     upButton.disabled = scheduleBusy || idx === 0;
     upButton.addEventListener("click", () => moveRule(idx, -1));
@@ -974,9 +975,10 @@ function renderRuleList(rules) {
     downButton.className = "btn-icon";
     downButton.textContent = "▼";
     downButton.title = "下移（降低规则匹配优先级）";
-    downButton.dataset = { edgeDisabled: idx === rules.length - 1 ? "true" : "false" };
     if (typeof downButton.setAttribute === "function") {
       downButton.setAttribute("data-edge-disabled", idx === rules.length - 1 ? "true" : "false");
+    } else if (downButton.dataset) {
+      downButton.dataset.edgeDisabled = idx === rules.length - 1 ? "true" : "false";
     }
     downButton.disabled = scheduleBusy || idx === rules.length - 1;
     downButton.addEventListener("click", () => moveRule(idx, 1));
