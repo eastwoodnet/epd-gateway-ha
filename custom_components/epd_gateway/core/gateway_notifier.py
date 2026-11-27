@@ -60,16 +60,17 @@ class GatewayNotifier:
 
     async def trigger_calendar_mode(
         self,
+        *,
+        timezone: int,
         timestamp: Optional[int] = None,
-        timezone: int = 8,
-        delay_sec: float = 0.0
+        delay_sec: float = 0.0,
     ) -> bool:
         ts = int(timestamp if timestamp is not None else time.time())
         return await self._post_gateway(
             "/api/ble/calendar",
             payload_data={"timestamp": ts, "timezone": timezone},
             read_timeout=25.0,
-            delay_sec=delay_sec
+            delay_sec=delay_sec,
         )
 
     def _run_background(self, coro):
@@ -87,8 +88,9 @@ class GatewayNotifier:
 
     def trigger_calendar_mode_background(
         self,
+        *,
+        timezone: int,
         timestamp: Optional[int] = None,
-        timezone: int = 8,
-        delay_sec: float = 0.0
+        delay_sec: float = 0.0,
     ):
         self._run_background(self.trigger_calendar_mode(timestamp=timestamp, timezone=timezone, delay_sec=delay_sec))

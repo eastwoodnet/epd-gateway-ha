@@ -77,4 +77,4 @@ class EpdGatewayNotifyEntity(NotifyEntity):
             duration_min=duration,
             sender="HA通知系统",
         )
-        await self.coordinator._run_in_executor(self.coordinator.activate_memo, req)
+        await self.coordinator.async_activate_memo(req)

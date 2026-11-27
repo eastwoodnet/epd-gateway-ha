@@ -72,7 +72,9 @@ class EpdNativeCalendarButton(_BaseEpdButton):
     _attr_icon = "mdi:calendar-clock"
 
     async def async_press(self) -> None:
-        await self.coordinator.notifier.trigger_calendar_mode()
+        await self.coordinator.notifier.trigger_calendar_mode(
+            timezone=self.coordinator.get_tz_offset_hours()
+        )
 
 
 class EpdClearMemoButton(_BaseEpdButton):

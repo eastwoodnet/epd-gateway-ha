@@ -223,13 +223,14 @@ class EpdGatewayCoordinator:
 
         self.notifier.trigger_sync_background()
 
-    def activate_memo(self, req: MemoRequest):
-        state = self.memo_mgr.set_memo(
-            text=req.text,
-            title=req.title,
-            duration_min=req.duration_min,
-            sender=req.sender,
-            theme=req.theme,
+    async def async_activate_memo(self, req: MemoRequest):
+        state = await self._run_in_executor(
+            self.memo_mgr.set_memo,
+            req.text,
+            req.title,
+            req.duration_min,
+            req.sender,
+            req.theme,
         )
         self.notify_listeners()
         self.notifier.trigger_sync_background()

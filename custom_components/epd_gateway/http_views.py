@@ -281,7 +281,7 @@ class EpdMemoPushView(HomeAssistantView):
                 **req.model_dump(exclude={"duration_min"}),
                 duration_min=coord.settings_mgr.settings.default_memo_duration_min,
             )
-        state = await coord._run_in_executor(coord.activate_memo, req)
+        state = await coord.async_activate_memo(req)
         return _json_response({
             "status": "ok",
             "message": "便签已激活，并已通知网关立即同步",
